@@ -97,7 +97,7 @@ ignore:
 # Extensions
 ## Plugins: https://hexo.io/plugins/
 ## Themes: https://hexo.io/themes/
-theme: landscape
+theme: next
 
 # Deployment
 ## Docs: https://hexo.io/docs/one-command-deployment
@@ -106,9 +106,9 @@ deploy:
   repo: https://github.com/wangzhou/wangzhou.github.io.git
   branch: main
 
-  #auto_excerpt:
-  #  enable: true
-  #  length: 150
-
 reward_comment: test
 wechatpay: /images/zone-types.jpg
+
+auto_excerpt:
+  enable: true
+  length: 150

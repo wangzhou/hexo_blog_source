@@ -1,16 +1,15 @@
 ---
 title: TPH analysis
 date: 2021-05-21 05:15:56
-tags:
+tags: [PCIe]
+description: "TPH is a PCIe feature which can be seen in PCIe3.0 spec. This document
+will analysis this feature, the goal here is to find how to support it from software
+(Linux kernel)"
 ---
 TPH analysis
 ------------
 
 -v0.1 2017.6.1 Sherlock init
-
- TPH is a PCIe feature which can be seen in PCIe3.0 spec. This document will
- analysis this feature, the goal here is to find how to support it from software
- (Linux kernel)
 
 ```      
                              +-----+
