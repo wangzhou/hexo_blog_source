@@ -5,8 +5,8 @@
 # Site
 title: Sherlock's blog
 subtitle: ''
-description: ''
-keywords:
+description: 'Linux, kernel, 计算机体系构架'
+keywords: Linux, kernel, 计算机体系构架
 author: Sherlock Wang
 language: zh-CN
 timezone: 'Asia/Shanghai'
