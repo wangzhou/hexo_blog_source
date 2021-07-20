@@ -3,6 +3,7 @@ title: Linux线程学习- APUE11/12章
 date: 2021-06-19 09:43:55
 tags: [Linux用户态编程, APUE]
 description: "Linux线程学习- APUE11/12章笔记"
+categories: read
 ---
 
 1. 线程的创建和退出

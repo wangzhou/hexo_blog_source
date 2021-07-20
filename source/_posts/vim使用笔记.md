@@ -1,0 +1,163 @@
+---
+title: vim使用笔记
+date: 2021-07-17 11:07:32
+tags: [软件开发]
+description: "本文档用来收集vim的各种使用技巧"
+categories:
+---
+
+1. 水平创建一个terminal:
+
+   vert term
+
+2. term
+
+3. ctrl + w ctrl + n
+   打开的terminal进入vim的normal模式，可以使用vim的复制命令复制信息到原来的窗口里。
+
+4. 在插入模式的时候，当前的一个单词输入错了，可以用ctrl + w删去当前的单词，
+   ctrl + u删除到首行。注意这个在shell里也是可以使用的。
+
+   这个可以在输入的时候不用退出插入模式来删除单词，当然是针对英文的。
+
+5. 切换到普通模式可以用ctrl + [, 用手指整体移开去按esc。
+
+6. 普通模式下，z + enter把当前行拉到最顶行。
+
+7. 普通模式下，按R进入替换模式，这时直接输入，输入的字符直接覆盖之前的内容。
+   这个功能和word下的替换是一样的。gR是虚拟替换模式，按实际的占位替换。
+
+8. 注意多用.命令，这个命令重复之前得到操作。我们要先定义一个操作的意思。
+   普通模式下，一个操作就是一个操作。进入和esc之间的整个插入模式算一个操作。
+
+9. 录制宏: q[a-z] 开始录制宏，q 停止录制宏，@[a-z] 使用宏。
+
+10. daw 普通模式下删除当前的单词，delete a word 
+
+11. cw 普通模式下，删除当前位置到单词结尾，change word
+    caw 在光标处于一个单词中间的时候，可以删除这个单词。a是around的意思。
+
+12. f + char，跳到本行第一个字符; t + char, 光标移动到char的前一个字符
+
+13. 全局替换：%s/xxx/yyy/g
+    s代表替换，%表示1,$，是全局的意思。
+
+14. 转换成大写: 可视状态选要转换的部分，gU
+
+15. 快速移动光标可以使用叫easymotion的vim插件。
+    
+    在~/.vim/bundle下git clone https://github.com/easymotion/vim-easymotion.git
+    在再~/.vim/bundle下git clone https://github.com/VundleVim/Vundle.vim.git
+    后者是一个vim插件的管理器，可以用来安装easymotion。之后，按照Vundle.vim里
+    README.md的提示, 把“3. Configure Plugins”的一段配置copy到.vimrc里，把其中
+    的Plugin xxx都删了，改成Plugin 'easymotion/vim-easymotion'。代开vim run:
+    PluginInstall, 会有easymotion安装提示出来，并显示已经装好了。打开vim run:
+    help easymotion.txt, 可以看到easymotion的help文档。
+
+    具体使用的时候在.vimrc里加入一行快捷键的映射，可以是：
+    nmap ss <Plug>(easymotion-s2)  这样的效果是当你按ss的后会进入easymotion的
+    搜索输入，这个时候输入想要调到的地方的两个连续字符，之后整个屏幕凡是有这
+    两个连续字符的地方都会高亮，并且出现一个标记的字符，直接按这个字符就可以把
+    光标跳到对应的位置。
+
+    太太强大了！
+
+16. 使用vim画ASCII图
+
+    Linux kernel中的文档也有很多包含ASCII图。介绍两个在vim下画ASCII图的工具。
+    使用工具画图, 效率更高。
+
+    1. boxe 
+   
+       可以插入一些这个软件中自带的图形，效果如下：
+       输入命令：echo "example" | boxes -d dog
+```
+          __   _,--="=--,_   __
+         /  \."    .-.    "./  \
+        /  ,/  _   : :   _  \/` \
+        \  `| /o\  :_:  /o\ |\__/
+         `-'| :="~` _ `~"=: |
+    	    \`     (_)     `/
+     .-"-.   \      |      /   .-"-.
+.---{     }--|  /,.-'-.,\  |--{     }---.
+ )  (_)_)_)  \_/`~-===-~`\_/  (_(_(_)  (
+(  example                              )
+ )                                     (
+'---------------------------------------'
+```
+       在ubuntu下直接 sudo apt-get install boxes 安装即可。
+       可以在/etc/boxes/boxes-config中查看其支持的图形。
+
+    2. vim插件drawIt
+
+       若手工去画ASCCI图，需要不断的调整。这个插件的功能简单的说，即他能使我们先把
+       字符摆好，然后运用该插件加上线条：
+
+       step 1: 输入表格中的字符
+```
+         AAAA     BBBB     BBBB      CCCC
+
+         AAAA     BBBB     BBBB      CCCC
+
+         AAAA     BBBB     BBBB      CCCC
+```
+       step 2: 打开drawIt功能加上表格的框框
+```
+      +--------+--------+---------+--------+
+      |  AAAA  |  BBBB  |  BBBB   |  CCCC  |
+      +--------+--------+---------+--------+
+      |  AAAA  |  BBBB  |  BBBB   |  CCCC  |
+      +--------+--------+---------+--------+
+      |  AAAA  |  BBBB  |  BBBB   |  CCCC  |
+      +--------+--------+---------+--------+
+```
+      具体的安装和使用方法见：
+      http://blog.chinaunix.net/uid-23105261-id-109508.html
+
+17. set cc=80 //第80列是一道红色的线，一般代码在红线以内（只占79列）
+    统一缩进：shift + > or shift + < 
+
+18. ts xxx 查看定义, 在行末模式下输入:ts 待查类型/函数, 将得到他的定义
+
+
+19. **,**s/a/b/g 第**行到第**行中所有的a换成b。
+    **,**s/a/b/gc 可以选择要改变的“a”, 如果有些“a”不想变成“b”, 这个选项还是比较有用的
+
+    加注释的方式可以是：**，**s/^/\/\//g  或 **，**s/^/#/g
+
+    当然加注释的方法还可以，control+v, 向下选中要加的行，I 表示插入，光标会跳回
+    第一行，然后输入//作为注释最后按exit键，这时会发现之前选中的行之前都加上了//注释
+
+20. 代码补全 ctrl+p
+ 
+21. 多个tags文件在.vimrc中用逗号隔开即可, 搜索的时候可以在多个tags中:
+    set tags=/path_1/tags,/path_2/tags
+
+    set tags=tags;  注意要加“；”，这个配置可以逐级向上查找tag文件，找见后就set tag。
+    这个对于有多个代码库的情况比较方便，不用在.vimrc里把tag的路径写死，只要把tag
+    文件放在代码的根目录下，不管在哪里打开, 总可以找到tag,并且set tag
+
+22. 跳到函数的开始、结尾：
+    [[, ]], [], ][
+    1. 两个符号相同，则跳到函数的开头。[[跳到前一个的开头，]]跳到后一个的开头
+    2. 两个符号不同，则跳到函数的结尾。[]跳到前一个的结尾，][跳到后一个的结尾
+
+23. ctrl+d ctrl+u: 上下翻半页。ctrl+e ctrl+y: 光标不动，上下滚屏
+
+24. ctrl+v块选择, shift+v行选择
+
+25. set tabstop=8, tab按键一次缩进8个字符的宽度
+    set softtabtop, linux下最好不要设置，若softtabtop=4, 第一次输入4个空格，第二次
+    按输入4个空格，然后把8个空格转变成一个tab. kernel中的缩进是8个字符哦！
+
+26. noremap <F4> :TlistToggle<CR>
+    noremap <F2> :NERDTreeToggle<CR>
+    nnoremap <silent> <F3> :Grep<CR>
+    映射F4，F2，F3按键到对应的插件程序，第一个列出文件中所有的变量名、函数名和宏
+    第二个列出目录结构，第三个查找光标所在处的字符串，可以改变该字符串的查找路径！
+
+27. set spell可以为你检查文件中有没有拼错的词，但貌似只支持英文. 
+
+28. jump between two files or two functions
+    向前跳到前几次光标的位置：ctrl + i
+    向后跳到后几次光标的位置：ctrl + o 这样可以在函数定义和调用处来回跳动
