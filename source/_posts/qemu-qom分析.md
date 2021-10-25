@@ -1,0 +1,201 @@
+---
+title: qemu qom分析
+date: 2021-07-26 14:12:03
+tags: [QEMU, 面向对象]
+description: "qemu里使用面向对象的模型来模拟相关的元素，可以想象这样的模拟是很合理的，比如，
+用device描述一个设备的基类，pci_device可以继承device，然后vfio的pci设备又可以
+继承pci_device，同时一个用纯用软件模拟的pci网络设备也可以继承pci_device。
+本文描述这个基于面向对象的思路构建起来的qemux模型。分析基于qemu 5.2.92版本。"
+categories:
+---
+
+用c语言实现面向对象的模型
+--------------------------
+
+ qemu里用c语言实现了面向对象的模型。我们先梳理用c实现面向对应的基本逻辑。面向对象
+ 的三个特征是：封装、继承和多态。
+
+ 封装可以用struct实现。
+
+ 继承可以用struct包含的方式实现，把父类的struct放到子类struct的最开始的位置，这样
+ 子类的指针可以直接强制转换成父类的指针，在子类的函数，比如子类的初始化函数里可以
+ 直接得到父类的指针，然后调用父类的初始化函数。但是继承层级大于两级的时候似乎是有
+ 问题的(fixme)
+
+ 多态可以用函数指针的方式实现。
+
+ qemu里的实现，多了TypeInfo这个概念，它是class的描述。
+
+类的定义
+---------
+```
+ type_init(fn)
+       /* 用宏定义了一个动态库的初始化函数, qemu编译出的库有？*/
+   +-> module_init
+    +-> register_module_init
+          /* 如下都用edu设备举例(hw/misc/edu.c)，这里的fn就是pci_edu_register_types */
+      +-> e->init = fn
+```
+ fn这个函数一般是TypeInfo的注册函数, 把TypeInfo挂到系统的链表里。class是随后解析
+ Typeinfo的内容动态生成的。
+
+对象的生成
+-----------
+
+ 顺着qemu的main函数，看看class和对象是怎么生成的：qemu/softmmu/main.c
+```
+ main
+   +-> qemu_init
+     +-> qemu_init_subsystems
+           /* 根据TypeInfo创建class */
+       +-> module_call_init(MODULE_INIT_QOM)
+             /*
+              * init即为如上的fn, 这里的init只是把TypeInfo向qemu注册，类的
+              * 初始化还在后面。具体拿edu里的pci_edu_register_types函数看下。
+              */     
+         +-> ModuleEntry->init
+```
+  可以看见这个函数拿自己的初始化函数定义了TypeInfo数据结构，然后把他注册到系统
+  TypeInfo的链表。
+```
+static void pci_edu_register_types(void)
+{
+    static InterfaceInfo interfaces[] = {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    };
+    static const TypeInfo edu_info = {
+        .name          = TYPE_PCI_EDU_DEVICE,
+        .parent        = TYPE_PCI_DEVICE,
+        .instance_size = sizeof(EduState),
+        .instance_init = edu_instance_init,
+        .class_init    = edu_class_init,
+        .interfaces = interfaces,
+    };
+
+    type_register_static(&edu_info);
+}
+```
+  顺着qemu_init函数继续往下看，找下class以及具体的设备是在哪里创建的。还是以edu
+  这个设备为例。这个设备使用-device edu的qemu命令行参数启动，所有它创建的位置应该
+  在：
+```   
+    qemu_opts_foreach(qemu_find_opts("device"),
+                      device_init_func, NULL, &error_fatal);
+```
+   下面具体分析其中的qdev_device_add:
+```
+  qdev_device_add
+        /* driver就是模块里的device name, edu的driver就是edu */
+    +-> driver = qemu_opt_get(opts, "driver")
+      +-> module_object_class_by_name(*driver)
+        +-> oc = object_class_by_name(typename)
+              /*
+               * type_initialize是根据注册的Type创建class的函数。创建class的具体
+               * 实例的时候，如果class没有创建，就会创建class，被创建的class的指针
+               * 会放到注册Type的class域段。
+               *
+               * 可以看到这个函数为class分配了空间，递归初始化了父类，把父类空间
+               * 中的内容copy到了当前类最开始的空间。初始化class的interface和
+               * property，并在最后调用了class的init函数，把class的数据和操作函数
+               * 都添加上。
+               *
+               * 创建的interface class会挂到对应device class的链表上。
+               */
+          +-> type_initialize(type)
+        /* 注意，这里返回的是DeviceClass */
+    +-> dc = qdev_get_device_class(&driver, errp)
+        /* 找见设备对应的bus */
+    +-> bus = qbus_find(path, errp)
+        /* 创建设备, 可以看到如果没有class的话，在如下函数里会先创建class */
+    +-> dev = qdev_new(driver)
+      +-> object_new(typename)
+            /*
+             * 为设备对象分配了内存空间, 把设备里的class指针指向class，为设备
+             * 初始化class里定义的各个property。调用instance_init初始化设备。
+             * 注意这个时候设备还不是在可用的状态。
+             */
+        +-> object_new_with_type(ti)
+	/* 解析输入的设备属性并且保存到设备的属性hash表里 */
+    +-> qemu_opt_foreach(opts, set_property, dev, errp)
+    +-> qdev_realize(DEVICE(dev))
+          /* 调用到class里的realize函数激活设备, 具体的分析在下面一节 */
+      +-> object_property_set_bool(OBJECT(dev), "realized", true, errp)
+```
+
+properties是什么
+----------------
+
+ 所谓属性，就是在一个对象里定义的一些功能，这些功能有名字，有对应的执行函数，还有
+ 添加和删除函数。当添加一个属性的时候，就是把这个属性已经对应的执行函数保存到对象
+ 专门用来存各种属性的一个hash table。当执行属性的操作时，就是执行对应属性附带的
+ 执行函数。
+
+ 我们还是拿edu这个设备为例。edu在实例初始化的时候挂给PCIDeviceClass的realize一个
+ 回调函数pci_edu_realize，这个函数就是PCI设备里realize属性的执行函数。我们需要明确
+ 这个realize属性在哪里添加和在哪里调用。
+
+ device class的初始化函数里增加了realized属性：
+```
+ /* hw/core/qdev.c */
+ device_class_init
+      /*
+       * 把realized属性加到ObjectClass里。device_set_realized里会调用DeviceClass里的
+       * realize回调函数。DeviceClass里的realize回调在pci_device_class_init里挂成
+       * pci_qdev_realize。pci_qdev_realize调用PCIDeviceClass里的realize函数，这个
+       * 函数又是由具体设备的class init函数添加，比如edu的edu_class_init。
+       */
+   -> object_class_property_add_bool(ObjectClass, "realized", device_get_realized, device_set_realized)
+```
+
+ 在如上的qdev_device_add里，在创建了设备的实例后，后调用qdev_realize把设备realize，
+ 这个函数会从Device这一层，层层的调用realize函数:
+```
+ /* hw/core/qdev.c */
+ qdev_realize
+   -> object_property_set_bool(OBJECT(dev), "realized", true, errp)
+     [...]
+     -> object_property_set
+          /* 可以看到realized相关的add和find都是发生在Object、ObjectClass这个层次 */
+       -> ObjectProperty *prop = object_property_find(obj, name, errp)
+            /* 先用obj找到ObjectClass，再在ObjectClass找property */
+         -> object_class_property_find(klass, name, NULL)
+            /* 在Object里找property */
+         -> g_hash_table_lookup(obj->properties, name)
+
+       -> prop->set(obj, v, name, prop->opaque, &err)
+```
+ 如上，分析qemu的qom重点关注如下的文件: hw/misc/edu.c, hw/pci/pci.c, hw/core/qdev.c,
+ qom/object.c。各个层级的Type定义分别对应的文件里(这里用pci设备为例)
+
+ 一个典型的使用属性的地方是在qemu启动的时候通过命令行参数给一个设备传递一个属性值。
+ 我们分析这里的代码流程，还是以edu为例，edu_instance_init里的object_property_add_uint64_ptr
+ 为edu设备加了dma_mask这样一个设备属性。在qemu的启动命令行里可以如下配置使用：
+```
+	--device edu,dma_mask=0xffffff
+```
+ 可以看到qemu_opt_foreach(opts, set_property, dev, errp)解析设备属性在instance_init
+ 之后，在realize函数调用之前。所以，edu驱动里在instance_init里把设备属性的定义加
+ 到设备对应的属性hash表里，如上的解析函数才能把命令行输入的属性和设备属性匹配。
+ edu需要在realize函数或者realize之后才能使用传入的设备属性。
+
+ link属性
+
+ 有了上面的分析，link属性的使用也可以想到，他同样可以使用qemu的启动命令行确定qemu
+ 部件之间的逻辑关系。
+
+ child属性
+
+interface
+---------
+
+ 目前只看了PCI/PCIe设备里使用了interface这个东西，PCIe设备用INTERFACE_PCIE_DEVICE
+ PCI设备用INTERFACE_CONVENTIONAL_PCI_DEVICE。pci设备的realize函数里根据interface
+ 的情况决定是否要使能PCI_CAP_EXPRESS，这个只在PCIe的时候使能。
+
+ 注意，PCI设备只有0x0~0xff的配置空间。
+
+一个例子
+--------
+ 
+ 这里写一个dma engine的qemu设备。

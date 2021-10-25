@@ -12,8 +12,9 @@ categories:
 
 2. term
 
-3. ctrl + w ctrl + n
+3. ctrl + w + N
    打开的terminal进入vim的normal模式，可以使用vim的复制命令复制信息到原来的窗口里。
+   注意这里是大写的N。
 
 4. 在插入模式的时候，当前的一个单词输入错了，可以用ctrl + w删去当前的单词，
    ctrl + u删除到首行。注意这个在shell里也是可以使用的。
@@ -46,8 +47,8 @@ categories:
 
 15. 快速移动光标可以使用叫easymotion的vim插件。
     
-    在~/.vim/bundle下git clone https://github.com/easymotion/vim-easymotion.git
-    在再~/.vim/bundle下git clone https://github.com/VundleVim/Vundle.vim.git
+    在\~/.vim/bundle下git clone https://github.com/easymotion/vim-easymotion.git
+    在再\~/.vim/bundle下git clone https://github.com/VundleVim/Vundle.vim.git
     后者是一个vim插件的管理器，可以用来安装easymotion。之后，按照Vundle.vim里
     README.md的提示, 把“3. Configure Plugins”的一段配置copy到.vimrc里，把其中
     的Plugin xxx都删了，改成Plugin 'easymotion/vim-easymotion'。代开vim run:
@@ -55,7 +56,7 @@ categories:
     help easymotion.txt, 可以看到easymotion的help文档。
 
     具体使用的时候在.vimrc里加入一行快捷键的映射，可以是：
-    nmap ss <Plug>(easymotion-s2)  这样的效果是当你按ss的后会进入easymotion的
+    nmap ss \<Plug\>(easymotion-s2)  这样的效果是当你按ss的后会进入easymotion的
     搜索输入，这个时候输入想要调到的地方的两个连续字符，之后整个屏幕凡是有这
     两个连续字符的地方都会高亮，并且出现一个标记的字符，直接按这个字符就可以把
     光标跳到对应的位置。
@@ -72,18 +73,18 @@ categories:
        可以插入一些这个软件中自带的图形，效果如下：
        输入命令：echo "example" | boxes -d dog
 ```
-          __   _,--="=--,_   __
-         /  \."    .-.    "./  \
-        /  ,/  _   : :   _  \/` \
-        \  `| /o\  :_:  /o\ |\__/
-         `-'| :="~` _ `~"=: |
-    	    \`     (_)     `/
-     .-"-.   \      |      /   .-"-.
-.---{     }--|  /,.-'-.,\  |--{     }---.
- )  (_)_)_)  \_/`~-===-~`\_/  (_(_(_)  (
-(  example                              )
- )                                     (
-'---------------------------------------'
+              __   _,--="=--,_   __
+             /  \."    .-.    "./  \
+            /  ,/  _   : :   _  \/` \
+            \  `| /o\  :_:  /o\ |\__/
+             `-'| :="~` _ `~"=: |
+                \`     (_)     `/
+         .-"-.   \      |      /   .-"-.
+    .---{     }--|  /,.-'-.,\  |--{     }---.
+     )  (_)_)_)  \_/`~-===-~`\_/  (_(_(_)  (
+    (  example                              )
+     )                                     (
+    '---------------------------------------'
 ```
        在ubuntu下直接 sudo apt-get install boxes 安装即可。
        可以在/etc/boxes/boxes-config中查看其支持的图形。
@@ -94,13 +95,13 @@ categories:
        字符摆好，然后运用该插件加上线条：
 
        step 1: 输入表格中的字符
-```
-         AAAA     BBBB     BBBB      CCCC
 
          AAAA     BBBB     BBBB      CCCC
 
          AAAA     BBBB     BBBB      CCCC
-```
+
+         AAAA     BBBB     BBBB      CCCC
+
        step 2: 打开drawIt功能加上表格的框框
 ```
       +--------+--------+---------+--------+
@@ -117,10 +118,10 @@ categories:
 17. set cc=80 //第80列是一道红色的线，一般代码在红线以内（只占79列）
     统一缩进：shift + > or shift + < 
 
-18. ts xxx 查看定义, 在行末模式下输入:ts 待查类型/函数, 将得到他的定义
+18. ts *** 查看定义, 在行末模式下输入:ts 待查类型/函数, 将得到他的定义
 
 
-19. **,**s/a/b/g 第**行到第**行中所有的a换成b。
+19. XX, XXs/a/b/g 第XX行到第XX行中所有的a换成b。
     **,**s/a/b/gc 可以选择要改变的“a”, 如果有些“a”不想变成“b”, 这个选项还是比较有用的
 
     加注释的方式可以是：**，**s/^/\/\//g  或 **，**s/^/#/g
@@ -131,9 +132,9 @@ categories:
 20. 代码补全 ctrl+p
  
 21. 多个tags文件在.vimrc中用逗号隔开即可, 搜索的时候可以在多个tags中:
-    set tags=/path_1/tags,/path_2/tags
+    set tags=/path_1/tags,/path_2/tags
 
-    set tags=tags;  注意要加“；”，这个配置可以逐级向上查找tag文件，找见后就set tag。
+    set tags=tags;  注意要加“；”，这个配置可以逐级向上查找tag文件，找见后就set tag。
     这个对于有多个代码库的情况比较方便，不用在.vimrc里把tag的路径写死，只要把tag
     文件放在代码的根目录下，不管在哪里打开, 总可以找到tag,并且set tag
 
@@ -150,14 +151,27 @@ categories:
     set softtabtop, linux下最好不要设置，若softtabtop=4, 第一次输入4个空格，第二次
     按输入4个空格，然后把8个空格转变成一个tab. kernel中的缩进是8个字符哦！
 
-26. noremap <F4> :TlistToggle<CR>
-    noremap <F2> :NERDTreeToggle<CR>
-    nnoremap <silent> <F3> :Grep<CR>
-    映射F4，F2，F3按键到对应的插件程序，第一个列出文件中所有的变量名、函数名和宏
+26. 映射F4，F2，F3按键到对应的插件程序，第一个列出文件中所有的变量名、函数名和宏
     第二个列出目录结构，第三个查找光标所在处的字符串，可以改变该字符串的查找路径！
+```
+    noremap <F4> :TlistToggle<CR>
+    noremap <F2> :NERDTreeToggle<CR>
+    nnoremap <silent> <F3> :Grep<CR>
+```
 
 27. set spell可以为你检查文件中有没有拼错的词，但貌似只支持英文. 
 
 28. jump between two files or two functions
     向前跳到前几次光标的位置：ctrl + i
     向后跳到后几次光标的位置：ctrl + o 这样可以在函数定义和调用处来回跳动
+
+29. 尽量在vim内完成所有操作，包括:make, vimgrep(缩写成vim)
+    vimgrep的格式是：vim /search_patten/ **/*.[ch] **是当前目录以及以下目录的通配符，
+    *是当前目录的通配符。vimgrep搜索得到的各个条目会保存到一个叫quickfix的表里，
+    这个是vim的一个基本的功能，copen可以开一个窗口，然后在新开窗口中打开quickfix表，
+    cclose关闭打开的quickfix表。
+
+30. tj命名，tags jump 符号，可以搜索一个符号的位置，并且跳过去。stj split一个新
+    的窗口显示。有很多t开头的命令，最常用的要数ts了，tags select。
+
+31. ab命令，用一个缩写来代替一组字符。
