@@ -1,0 +1,260 @@
+---
+title: 在qemu里增加指令的前端解码
+date: 2021-12-25 23:56:02
+tags: [虚拟化, qemu]
+description: "本文梳理在qemu里增加一个指令的前端解码的基本逻辑。"
+categories:
+---
+
+qemu基础逻辑
+------------
+
+ qemu虚拟机提供两种CPU实现的方式，一种是基于中间码的实现，一种是基于KVM的实现。
+
+ 第一种方式，我们一般叫tcg(tiny code generator)，这种方式的基本思路是用纯软件的
+ 方式把target CPU的指令先翻译成所谓的中间码，然后再把中间码翻译成host CPU 的指令，
+ 我们把target CPU指令翻译成中间码的过程叫整个过程的前端，中间码翻译成host CPU的
+ 过程对应的叫做后端。给qemu增加一个新CPU的模型需要既增加前端也增加后端，如果要把
+ 整个系统支持起来，还要增加基础设备以及user mode的支持，整个系统的支持的逻辑不在
+ 本文档里展开，本文只聚焦于前端的相关逻辑。如果目的是在一个成熟的平台上验证另一个
+ 新的CPU，比如在x86机器上跑riscv的虚拟机，验证riscv的逻辑，只需要加上riscv指令到
+ 中间码这个前端支持就好，因为中间码到x86的后端已经存在；如果目的是，比如在一台riscv
+ 的机器上模拟x86，就需要加中间码到riscv的后端支持，我们这里以riscv为例子，把它作为
+ 一个需要支持的CPU构架。
+
+ 一个完整的riscv到中间码前端支持的例子可以参考：
+ https://lore.kernel.org/all/1519344729-73482-1-git-send-email-mjc@sifive.com
+
+ 以riscv为例子，体系相关的前端的代码在：target/riscv/，后端的代码在：tcg/riscv/，
+ 基础外设和machine的代码在hw/riscv/
+
+ 基于KVM的方式，直接使用host CPU执行target CPU的指令，性能接近host上的性能，但是
+ 需要target CPU和host CPU是相同的构架。本文不讨论KVM的逻辑。
+
+qemu tcg前端解码逻辑
+--------------------
+
+ 把target cpu指令翻译成host cpu指令有两种方式，一种是使用helper函数，一种是使用
+ tiny code generator函数的方式。helper函数的方式还没有分析，现在只看tcg的方式。
+
+ 我们把逻辑拉高一层看问题，所谓target CPU的运行，实际上是根据target CPU指令流去
+ 不断的改变target CPU软件描述结构里的数据状态，因为实际的代码要运行到host CPU上，
+ 所以，target代码要被翻译成host代码，才可以执行，通过执行改变target CPU的数据状态。
+ qemu为了解耦把target CPU代码先翻译成中间码，那么翻译成的中间码的语义也就是改变
+ target CPU数据状态的一组描述语句，所以target CPU状态参数会被当做入参传入中间码
+ 描述语句。这组中间码是改变CPU状态的抽象的描述，有些CPU上的状态不好抽象成一般的
+ 描述就用helper函数的方式补充，所以helper函数也是改变target CPU状态的描述。
+
+ tcg的方式，我们要使用tcg_gen_xxx的函数组织逻辑描述target CPU指令对target CPU状态
+ 的改变。一些公共的代码是可以自动生成的，qemu里使用decode tree的方式自动生成这一部
+ 分代码。
+
+ 以riscv的代码来具体说明。qemu定义了一组target CPU指令的描述格式，说明文档在：
+ docs/devel/decodetree.rst，riscv的指令描述在target/riscv/insn16.decode、insn32.decode
+ 里，qemu编译的时候会解析.decode文件，生成对应的定义和函数，生成的文件放在
+ qemu/build/libqemu-riscv64-softmmu.fa.p/decode-insn32.c.inc，decode-insn16.c.inc里。
+ 这些文件生成的trans_xxx函数需要自己实现，riscv的这部分实现是放在了在target/riscv/insn_trans/*里。
+ 生成的文件里有两个很大的解码函数decode-insn32.c.inc和decode-insn16.c.inc，qemu
+ 把target CPU指令翻译成中间码的时候就需要调用上面两个解码函数。
+
+ 我们用riscv user mode的代码来看看上层具体调用关系。qemu提供system mode和user mode
+ 的模拟方式，其中system mode会完整模拟整个系统，一个完整的OS可以运行在这个模拟的
+ 系统上，user mode只是支持加载一个target CPU构架的用户态程序来跑，对于一般指令
+ 使用tcg的方式翻译执行，对于用户态程序里的系统调用，user mode代码里模拟实现了系统
+ 调用的语意。linux user mode的代码在qemu/linux-user/*，具体的调用过程如下：
+
+```
+ /* qemu/linux-user/main.c */
+ main
+   +-> cpu_loop
+     +-> cpu_exec
+       +-> tb_gen_code
+       |     /* qemu/target/riscv/trannslate.c */
+       | +-> gen_intermediate_code
+       | | +-> translator_loop(&riscv_tr_ops, xxx)
+       | |       /* riscv_tr_translate_insn */
+       | |   +-> ops->translator_insn
+       | |     +-> decode_ops
+       | |       +-> decode_insn16
+       | |       +-> decode_insn32
+       | +-> tcg_gen_code
+       |   +-> tcg_out_xxx
+       +-> cpu_loop_exec_tb
+```
+ gen_intermediate_code是前端的解码函数，把target CPU的指令翻译成tcg中间码。tcg_gen_code
+ 是后端，把中间码翻译成host CPU上的指令，其中tcg_out_xxx的一组函数做具体的翻译工作。
+ 
+ 基本逻辑就是这样。下面展开其中的各个细节看下，细节上大概有这么几块：
+
+ 1. tcg整个翻译流程构架分析
+ 2. decode tree的语法
+ 3. tcg trans_xxx函数的语法
+
+tcg翻译流程
+-----------
+
+ 整个tcg前后端的翻译流程按指令块的粒度来搞，收集一个指令块翻译成中间码，然后把
+ 中间码翻译成host CPU指令，整个过程动态执行。为了加速翻译，qemu把翻译成的host
+ CPU指令块做了缓存，tcg前端解码的时候，先在缓存里找，如果找见就直接执行。
+
+ 大致的代码调用关系如上。
+
+decode tree语法
+-----------------
+
+ 因为CPU指令编码总是一组一组的，就可以用decode去描述这些固定的结构。
+
+ decode tree里定义了几个描述：field，argument，format，pattern，group。依次看看
+ 他们是怎么用的。只记录要注意的点，细节还是直接看decodetree.rst这个文档。
+
+ CPU在解码的时候总要把指令中的特性field中的数据取出作为入参(寄存器编号，立即数，操作码等)，
+ field描述一个指令编码中特定的域段，根据描述可以生成取对应域段的函数。
+```
++---------------------------+---------------------------------------------+
+| Input                     | Generated code                              |
++===========================+=============================================+
+| %disp   0:s16             | sextract(i, 0, 16)                          |
++---------------------------+---------------------------------------------+
+| %imm9   16:6 10:3         | extract(i, 16, 6) << 3 | extract(i, 10, 3)  |
++---------------------------+---------------------------------------------+
+| %disp12 0:s1 1:1 2:10     | sextract(i, 0, 1) << 11 |                   |
+|                           |    extract(i, 1, 1) << 10 |                 |
+|                           |    extract(i, 2, 10)                        |
++---------------------------+---------------------------------------------+
+| %shimm8 5:s8 13:1         | expand_shimm8(sextract(i, 5, 8) << 1 |      |
+|   !function=expand_shimm8 |               extract(i, 13, 1))            |
++---------------------------+---------------------------------------------+
+```
+ 上面的定义中，一个数据，比如一个立即数，可能是多个域段拼成的，所以就有相应的
+ 移位操作，再比如有些立即数是编码域段的数值取出来后再进过简单运算得到的，field定义
+ 中带的函数就可以完成这样的计算。
+
+ argument用来定义数据结构，比如，riscv insn32.decode里定义的: &b imm rs2 rs1，
+ 编译后的decode-insn32.c.inc里生成的数据结构：
+```
+ typedef struct {
+     int imm;
+     int rs2;
+     int rs1;
+ } arg_b;
+```
+
+ format定义指令的格式。比如；
+```
+  @opr    ...... ra:5 rb:5 ... 0 ....... rc:5
+  @opi    ...... ra:5 lit:8    1 ....... rc:5
+```
+ 比如上面就是对一个32bit指令编码的描述，.表示一个0或者1的bit位，描述里可以用
+ field、之前定义的filed的引用、argument的引用，field的引用还可以赋值。field可以
+ 用来匹配，argument用来生成trans_xxx函数的入参。
+
+ pattern用来定义具体指令。比如riscv32里的lui指令：
+```
+ lui      ....................       ..... 0110111 @u
+
+ @u       ....................      ..... ....... &u      imm=%imm_u          %rd
+ %imm_u    12:s20                 !function=ex_shift_12
+ %rd        7:5
+```
+ 上面把相关的formate、argument、field的定义也列了出来。可以看到lui的操作码是0110111，
+ 31-12bit是立即数，11-7是rd寄存器的标号，其中立即数要把31-12bit的数值左移12bit。
+ 可以看到riscv里对应的trans函数的实现是：
+```
+ static bool trans_lui(DisasContext *ctx, arg_lui *a)
+ {
+     if (a->rd != 0) {
+         tcg_gen_movi_tl(cpu_gpr[a->rd], a->imm);
+     }
+     return true;
+ }
+```
+ 用生成的立即数更新rd寄存器。
+
+ group定指令解码的组合，这个用的不多。
+
+trans_xxx函数的逻辑
+-------------------
+
+ tcg的trans_xxx函数在qemu/tcg/README里很好的介绍，这个文档里介绍了中间码的整套
+ 指令，可以比较容易的把这套指令和对应的trans_xxx函数对上，trans_xxxx函数的作用是
+ 生成这些中间码指令。以riscv上的add指令为例看下，如下是trans_rvi.c.inc里add指令
+ 的模拟。
+```
+static bool trans_add(DisasContext *ctx, arg_add *a)
+{
+    return gen_arith(ctx, a, &tcg_gen_add_tl);
+}
+
+static bool gen_arith(DisasContext *ctx, arg_r *a,
+                      void(*func)(TCGv, TCGv, TCGv))
+{
+    TCGv source1, source2;
+    source1 = tcg_temp_new();
+    source2 = tcg_temp_new();
+
+    gen_get_gpr(source1, a->rs1);
+    gen_get_gpr(source2, a->rs2);
+
+    (*func)(source1, source1, source2);
+
+    gen_set_gpr(a->rd, source1);
+    tcg_temp_free(source1);
+    tcg_temp_free(source2);
+    return true;
+}
+
+void tcg_gen_addi_i64(TCGv_i64 ret, TCGv_i64 arg1, int64_t arg2);
+```
+ tcg_gen_addi_i64可以看到tcg_gen_add_tl的函数入参，riscv的add指令从target CPU的
+ rs1，rs2里取两个加数，相加后放到rd寄存里，所以上面gen_get_gpr就表示生成这样的
+ 中间码：把rs1/2位置上的数据存到source1/2位置上，gen_get_gpr的实现就是:
+```
+ tcg_gen_mov_tl(t, cpu_gpr[reg_num])
+   -> tcg_gen_mov_i64
+     -> tcg_gen_op2_i64(INDEX_op_mov_i64, ret, arg)
+       -> tcg_gen_op2(opc, tcgv_i64_arg(a1), tcgv_i64_arg(a2))
+         -> TCGOp *op = tcg_emit_op(opc);
+         -> op->args[0] = a1;
+         -> op->args[1] = a2;
+```
+ 可以看到最后生成的mov指令先挂到了一个链表里，后面的后端解码会把这些指令翻译成
+ host指令，生成的指令就是qemu/tcg/README里介绍的mov_i32/i64 t0, t1这个指令。这里
+ 有几个逻辑要打通: 1. tcg_temp_new创建的变量存在哪里; 2. cpu_gpr[reg_num]是一个
+ 全局变量，它如何索引到target CPU的寄存器。
+
+ 首先tcg_temp_new分配的空间是在TCGContext tcg_ctx里的，所谓创建一个这样的TCGv就是
+ 在tcg_ctx里用去一个TCGTemp。cpu_gpr[reg_num]可以索引到target CPU寄存器的基本逻辑
+ 是，其实只要在前端和后端约定好描述target CPU的软件结构，cpu_gpr[reg_num]描述的就
+ 时相关寄存器在这个软件结构里的位置。我们再看下这个cpu_gpr[]的初始化逻辑和tcg_ctx
+ 的初始化逻辑，以及后端的编码逻辑就可以打通整个逻辑。
+```
+ riscv_translate_init
+   -> cpu_gpr[i] = tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, gpr[i]), riscv_int_regnames[i]);            
+```
+ cpu_env在tcg_context_init(unsigned max_cpus)里初始化，得到的是tcg_ctx里TCGTemp temps
+ 的地址。tcg_global_mem_new一次在tcg_ctx里从TCGTemp temps上分配空间，返回空间在
+ tcg_ctx上的相对地址。这样cpu_gpr[reg_name]就可以作为标记在前端和后端之间建立连接。
+ 
+ 后端的代码直接把中间码翻译成host指令，中间码中的TCGv直接映射到host CPU的寄存器上，
+ 从逻辑上讲，应该是翻译得到的host代码修改中间码对应TCGv对应的内存才对。这里的基本
+ 逻辑是qemu在生成的中间码中以及TB执行后做了host寄存器到target CPU描述内存之间的
+ 同步。
+```
+ /* qemu/tcg/riscv/tcg-target.c.inc */
+ /* tcg_out_op是整个后端解码体系架构相关的入口函数，每个架构都要做具体实现 */
+ tcg_out_op
+   -> case INDEX_op_add_i64
+     -> tcg_out_opc_reg
+       -> tcg_out32
+```
+ 可以看到add_i64的中间码直接翻译到了host上的寄存器，这里后端的翻译还是拿riscv举例了。
+
+```
+ tcg_gen_code
+      /* 如上提到的同步代码逻辑在这个函数中 */
+   -> default: tcg_reg_alloc_op
+     -> 生成用host指令描述的同步逻辑，放在TB里
+        /* 生成业务相关的host指令，后端译码的总入口 */
+     -> tcg_out_op
+```
+ 如上是同步的一个大概逻辑，具体细节需要进一步分析。

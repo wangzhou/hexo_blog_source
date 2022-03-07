@@ -1,0 +1,223 @@
+---
+title: PLKA第三章读书笔记
+date: 2021-12-20 23:29:56
+tags: [内存管理, Linux内核]
+description: "本文是PLKA第三章的阅读笔记，第三章主要讲物理内存的分配。本文参考PLKA分析最新
+      的内核代码，并不全是PLKA内容的整理，代码分析基于5.10。"
+categories: read
+---
+
+基础数据结构
+------------
+
+一个NUMA的描述数据结构是：struct pglist_data(include/linux/mmzone.h)。一个NUMA里
+有多个不同的域，比如DMA，Normal，高端内存等，每一个这样的域用struct zone描述(mmzone.h)。
+每个zone里的伙伴系统内存用struct free_area(mmzone.h)描述，free_area是用order索引的
+一个数组，数组里又按MIGRATE_TYPE分为若干个链表。如果用一幅图，大概表示如下：
+```
+ numa node 0:                                         numa node 1:
++-------------------------------------------------+ +-------------------------+
+|struct pglist_data {			          | | struct pglist_data {    |
+| +----------------------------------------------+| |                         |
+| |struct zone {                                 || |   [...]                 |
+| | +-------------------------------------------+|| |                         |
+| | |/* order 0 */                              ||| |                         |
+| | |struct free_area {                         ||| |                         |
+| | |  struct list_head free_list[MIGRATE_TYPES]||| |                         |
+| | |}                                          ||| |                         |
+| | +-------------------------------------------+|| |                         |
+| | +-------------------------------------------+|| |                         |
+| | |/* order 1 */                              ||| |                         |
+| | |struct free_area {                         ||| |                         |
+| | |  [...]                                    ||| |                         |
+| | |}                                          ||| |                         |
+| | +-------------------------------------------+|| |                         |
+| |  [...]                                       || |                         |
+| | +-------------------------------------------+|| |                         |
+| | |/* order MAX_ORDER - 1 */                  ||| |                         |
+| | |struct free_area {                         ||| |                         |
+| | |  [...]                                    ||| |                         |
+| | |}                                          ||| |                         |
+| | +-------------------------------------------+|| |                         |
+| |}                                             || |                         |
+| +----------------------------------------------+| |                         |
+| +----------------------------------------------+| |                         |
+| |struct zone {                                 || |                         |
+| |  [...]                                       || |                         |
+| |}                                             || |                         |
+| +----------------------------------------------+| |                         |
+| +----------------------------------------------+| |                         |
+| |struct zone {                                 || |                         |
+| |  [...]                                       || |                         |
+| |}                                             || |                         |
+| +----------------------------------------------+| |                         |
+|  [...]                                          | |                         |
+|}                                                | |}                        |
++-------------------------------------------------+ +-------------------------+
+```
+可以看出struct zone这个数据结构是比较核心的，除了上面所示，zone中还有很多其他的
+数据结构，比如用于管理页面回收的struct lruvec，最新的内核活跃页相关的链表都封装到了
+lurvec结构中，用户管理冷热页的数据封装在struct per_cpu_pageset __percpu *pageset。
+物理内存都是用page管理的，核心的数据结构是struct page (include/linux/mm_types.h)。
+虚拟地址到物理地址翻译要用到页表，内核里也定义了一些页表相关的数据结构：PGD，PUD，
+PMD，PTE是四级页表结构里的几个域段，与之相关的有一堆宏定义，各个体系结构需要自己
+定义相关的内容，比如riscv64的定义在arch/riscv/include/asm/pgtable-64.h
+
+内存管理初始化
+--------------
+
+把start_kernel流程里关于内存初始化相关的步骤提取出来。
+```
+  start_kernel
+    -> page_address_init
+       /* 看下riscv里的实现：arch/riscv/kernel/setup.c */
+    -> setup_arch
+       /*
+        * 解析device tree里定义的内存节点的内容，这里我用riscv qemu平台来调试，
+        * 所以memory的base在qemu/hw/riscv/virt.c里的VIRT_DRAM定义，是0x80000000，
+        * size的大小在qemu启动cmdline里定义，比如，-m 1024M，定义1GB的内存。
+        */
+      -> parse_dtb()
+        -> early_init_dt_scan
+          -> early_init_dt_scan_nodes
+            -> of_scan_flat_dt(early_init_dt_scan_memory, NULL)
+              -> early_init_dt_add_memory_arch(base, size)
+                -> memblock_add(base, size)
+
+      -> setup_bootmem()
+      -> paging_init()
+           /* zone里面内存的初始化从这里进入 */
+        -> zone_sizes_init()
+      -> swiotlb_init()
+      -> kasan_init()
+    -> build_all_zonelists()
+       /* lru和vm统计有关系 */
+    -> page_alloc_init()
+    -> mm_init()
+      -> mem_init()
+           /* 这个函数把物理内存加到伙伴系统里 */
+        -> memblock_free_all()
+          -> free_low_memory_core_early()
+            -> __free_memory_core()
+              /*
+               * 这里把若干个页搞成一个compound页，然后加到伙伴系统里。先都加到
+               * order最高的链表里。可以看到伙伴系统的初始化复用了free page的函数，
+               * free_one_page正式伙伴系统free page最核心的函数，具体分析在下面的
+               * 章节。
+               */
+              -> free_one_page
+    -> kmem_cache_init_late()
+    -> setup_per_cpu_pageset()
+    -> numa_policy_init()
+    -> anon_vma_init()
+    -> buffer_init()
+    -> pagecache_init()
+```
+
+伙伴系统
+--------
+
+内核的伙伴系统可以作为分析Linux内存管理的线索，按照伙伴系统的逻辑基本可以把内存
+管理的所有基本概念贯穿起来。总的来看，alloc_pages就可以贯穿起来，alloc_pages的
+快速路径上，可以直接分配出想要的页，但是慢速路径上，也就是说伙伴系统里管理的内存
+不够的时候，就会做各种内存回收的操作，如果有swap分区，就尝试把现有内存的内容写入
+swap分区来腾出内存，使用内存紧缩(compact)来移动碎片化的内存，这样可以腾出来更大的
+连续内存空间，在compact的时候就会使用到内存迁移(migrate page)，当这些都不行的时候，
+还可以把page cache里的内存回收(reclaim)，这样还没有内存就只有杀死占用内存过多的
+进程来回收内存了(oom)，在内存迁移的时候，因为一个page可能被map到了多个虚拟地址上，
+所以要找到一个page对应的所有虚拟地址，这就要用到反向映射(reverse mapping)，迁移
+的时候我们要断开VA到PA的映射，并重新建立VA到新PA的映射。内核用来分配小于一页内存
+的内存池slab分配器。伙伴系统的内存最开始来自memblock，memblock解析dts或者acpi里的
+信息得到系统中物理内存的配置。内存回收的时候要优先回收不用的冷页，相关的算法是LRU。
+
+从虚拟地址的角度，对于每一块虚拟地址，在内核里有vma数据结构来管理，申请虚拟内存
+可有用brk和mmap，申请的虚拟地址在第一次写的时候会触发fault，进程fork时对于虚拟地址
+的管理也是同样的道理(COW)，触发fault后，内核会分配物理页并且建立页表(page table)，
+这里的页有可能是大页(又分传统大页和透明大页)。
+
+下面看伙伴系统具体的实现。
+
+我们知道伙伴系统的基本模型是搞了很多不同order的链表，用这些链表存不同order的连续
+物理内存，分配的时候如果小的order的内存不够了，就拆开打的order内存用，内存放回伙伴
+系统里的时候，就放入对应order的链表，如果正好有他的“伙伴”也在伙伴系统中，就把他们
+合并起来，放入更高order的链表。
+
+如上所说的，伙伴系统中分配页的核心函数分为快速路径和慢速路径，慢速路径里要先做内存
+回收等，然后再尝试分配页，所以要分析这里就需要把我们的分析范围不断扩大。我们一个
+一个逻辑的看，这里先看page cache和他的回收，需要搞清楚的逻辑有，1. page cache
+的创建逻辑，2. page cache回收的逻辑，就是有一堆页都在page cache里，优先回收谁。
+
+page cache的创建逻辑可以顺着有文件背景的内存使用看下，分为对普通文件通过read/write
+系统调用读写和对普通文件通过mmap把文件内容映射到内存进行访问，内核对于这两种读文件
+的访问都会做预读，比如要读4KB的内容，内核可以读8KB，把多读的内容在page cache里先
+存起来。我们已mmap一个文件的逻辑看下具体的调用关系。(这一部分需要配合8.5章节来看)
+```
+mmap
+  -> ksys_mmap_pgoff
+    -> vm_mmap_pgoff
+      -> do_mmap
+         -> mmap_region
+           -> call_mmap
+             -> file->f_op->mmap
+/*
+ * 具体的文件系统会实现mmap这个回调函数，我们以ext2为例看下：ext2_file_mmap
+ * 代码的位置在fs/ext2/file.c
+ */
+ext2_file_mmap
+     /*
+      * 这个函数里为相关的vma挂上了generic_file_vm_ops，并没有做其他的事情。
+      * 可以看出mmap文件的系统调用完成时，文件内容并没有被copy到内存里，知道用户
+      * 真是的读mmap文件的内容是，会进入fault流程。下面继续看fault流程。
+      */
+  -> generic_file_mmap
+
+filemap_fault
+     /* 先去page cache里找 */
+  -> find_get_page
+  -> do_sync_mmap_readahead
+    -> page_cache_sync_ra
+      -> ondemand_readahead
+        -> do_page_cache_ra
+             /* page cache 预读核心函数 */
+          -> page_cache_ra_unbounded
+               /*
+                * 这里以ext2文件系统为例，其没有readpages回调，所以走到了这个分支。
+                * add_to_page_cache_lru是把page加入到lru链表的核心函数。
+                * (ext2 address_space_operations定义在fs/ext2/inode.c)
+                */
+            -> add_to_page_cache_lru
+            -> read_pages
+
+  -> filemap_read_page
+     /* ext2_readahead, fs/ext2/inode.c */
+```
+
+我们再看page cache的回收逻辑，就是内存不足了，先回收那些page的cache。这里关键是
+要确定那些page我们认为是不经常访问的。struct page里的flags定义了一堆page状态的标记
+位，这些标记位的查看函数是拿宏拼起来的，定义在include/linux/page-flags.h。struct page
+里对page的引用计数有atomic_t _mapcount、atomic_t _refcount，其中_refcount是对page
+最基础的引用计数，对page的引用，包括虚拟地址到page的映射，以及内核里内存管理相关
+结构管理page是对其的引用都会增加_refcount的值，虚拟地址到page的映射也会增加_mapcount
+的引用，_mapcount在逆向映射里使用。
+
+先看下__alloc_pages里慢速路径里的内存回收的入口，具体分析需要在其他文档里展开。
+```
+__alloc_pages
+  -> __alloc_pages_slowpath
+    -> wake_all_kswapds
+    -> __alloc_pages_direct_compact
+      /* 直接内存回收在这里 */
+    -> __alloc_pages_direct_reclaim
+      -> __perform_reclaim
+           /* linux/mm/vmscan.c */
+        -> try_to_free_pages
+          -> do_try_to_free_pages
+```
+
+slab分配器
+----------
+
+slab分配器的逻辑比较独立，我们先分析slab分配器的使用方式，再分析其实现。
+
+创建和销毁slab内存池：kmem_cache_create/kmem_cache_free
+从slab内存池里分配和释放内存：kmem_cache_alloc/kmem_cache_free

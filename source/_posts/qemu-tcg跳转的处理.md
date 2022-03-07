@@ -1,0 +1,94 @@
+---
+title: qemu tcg跳转的处理
+date: 2022-01-26 23:12:17
+tags: [qemu, 虚拟化]
+description: "本文分析qemu tcg中跳转指令模拟，以riscv平台作为例子。"
+categories:
+---
+
+以beq为例:
+```
+/* qemu/target/riscv/insn_trans/trans_rvi.c.inc */
+trans_beq
+  -> gen_branch
+    -> gen_new_lable
+    -> tcg_gen_brcond_tl
+    -> gen_goto_tb
+    -> gen_set_label
+    -> gen_goto_tb
+    -> ctx->base.is_jmp = DISAS_NORETURN;
+```
+如上的逻辑是生成中间码的，生成的代码还要执行，我们不用关注host上执行的细节，只要
+中间码这边的逻辑通就好。那就比较好理解上面的代码，结合tcg/README里的介绍。
+
+gen_new_lable是创建了一个lable，brcond_t是brcond_i32/i64 t0, t1, cond, label，根据
+t0/t1的计算决定是否要跳到lable处执行，gen_set_lable是set_label $label，相当于在
+当前位置设置lable。所以上面的代码生成的代码伪代码表示大概是：
+```
+lable l;
+
+if (t0 cond t1) {
+    goto l;
+}
+
+goto_tb(pc顺移);
+
+l:
+    goto_tb(计算新pc);
+```
+其中gen_goto_tb的逻辑是：
+```
+gen_goto_tb
+    if (translator_use_goto_tb(&ctx->base, dest)) {
+        tcg_gen_goto_tb(n);
+        tcg_gen_movi_tl(cpu_pc, dest);
+        tcg_gen_exit_tb(ctx->base.tb, n);
+    } else {
+        tcg_gen_movi_tl(cpu_pc, dest);
+        tcg_gen_lookup_and_goto_ptr();
+    }
+```
+可见这里有两种实现方式：如果goto_tb在tcg后端有实现就用goto_tb来跳转，否则就用
+goto_ptr来实现。goto_ptr的方式相对简单，先设置跳转的PC，然后会调用到
+lookup_tb_ptr(在accel/tcg/cpu-exec.c)，找对应的tb执行，如果没有找见就退出当前tb。
+
+goto_tb的方式比较绕一点，我们那riscv的后端实现具体看下。tcg_gen_goto_tb对应的
+中间码是INDEX_op_goto_tb，riscv的后端实现是：
+```
+/* tcg/riscv/tcg-target.c.inc */
+tcg_out_op
+  -> tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP0, TCG_REG_ZERO,
+                   (uintptr_t)(s->tb_jmp_target_addr + a0));
+  -> tcg_out_opc_imm(s, OPC_JALR, TCG_REG_ZERO, TCG_REG_TMP0, 0);
+  -> set_jmp_reset_offset(s, a0);
+       /*
+        * 注意a0就是tcg_gen_goto_tb的入参，就是n。注意，这个是理解goto_tb的关键，
+	* tcg_out_opc_imm在当前的tb里产生一条指令，这个地方把这个指令在tb里的位置
+	* 写在了tb_jmp_target_addr[n]这个地方。这个动作为后面链接下一个tb留出了
+	* 一个指令的位置。
+        */
+    -> s->tb_jmp_reset_offset[which] = tcg_current_code_size(s);
+```
+riscv exit_tb的后端实现：
+```
+tcg_out_op
+   if (a0 == 0) {
+       tcg_out_call_int(s, tcg_code_gen_epilogue, true);
+   } else {
+       tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_A0, a0);
+       tcg_out_call_int(s, tb_ret_addr, true);
+   }
+```
+注意这里的a0和n相关，n这个变量从这里被传入后端执行，然后从exit_tb里带出来，给到
+下个tb。我们回到主循环。
+```
+  cpu_exec
+    -> cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
+    -> tb_add_jump(last_tb, tb_exit, tb);
+      -> tb_set_jmp_target(tb, n, (uintptr_t)tb_next->tc.ptr);
+        -> uintptr_t offset = tb->jmp_target_arg[n];
+        -> tb_target_set_jmp_target(tc_ptr, jmp_rx, jmp_rw, addr);
+```
+如上，在下一次tb翻译执行循环里会把新tb里指令的地址直接覆盖上次tb里保留的位置。
+所以，使用go_tb，第一次执行的时候会退出tb，执行下一个tb，用新tb指令地址覆盖之前tb
+里的跳转预留位置，当再次执行前一个tb时，会直接跳转到新tb，就不会退出当前tb。
