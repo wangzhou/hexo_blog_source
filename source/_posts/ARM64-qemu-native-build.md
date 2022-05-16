@@ -1,7 +1,7 @@
 ---
 title: ARM64 qemu native build
 date: 2021-07-11 23:40:33
-tags: [qemu, 虚拟化]
+tags: [QEMU, 虚拟化]
 description: "本文记录在ARM64平台上编译QEMU的过程"
 categories:
 ---

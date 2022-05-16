@@ -1,7 +1,7 @@
 ---
 title: qemu user mode速记
 date: 2021-12-25 23:56:24
-tags: [虚拟化, qemu]
+tags: [虚拟化, QEMU]
 description: "本文是qemu user mode的一个速记，简单分析相关的代码、构建以及使用方法。
       具体以riscv为例说明。"
 categories:

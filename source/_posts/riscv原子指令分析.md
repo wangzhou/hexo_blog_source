@@ -1,0 +1,128 @@
+---
+title: riscv原子指令分析
+date: 2022-05-16 19:25:29
+tags: [riscv, 计算机体系结构, 原子指令]
+description: "本文分析risvc中原子指令的定义，以及qemu里的实现方式，qemu的代码是6.2.50，riscv spec的版本是20191213"
+categories:
+---
+
+riscv原子指令
+-------------
+
+ riscv的原子指令定义了load reserved/store conditional和直接更新内存的原子指令两大
+ 类。前者需要几条指令配合实现原子操作，后者一条指令就可以对内存做更新。riscv的这个
+ 版本里还没有提供CAS的单指令实现，协议推荐用lr/sc的方式实现CAS，并给出了参考代码。
+
+ lr/sc的方式在其他的构架里也都有，其基本的使用逻辑是，lr的时候同时针对load的地址
+ 设置一个硬件flag，sc操作的地址是之前设置flag的地址，而且flag是被设置的，而且没有
+ 其他的sc对之前的地址操作，那么这个sc指令才执行成功，否则执行失败。sc指令使用寄存器
+ 存放sc成功或失败的信息。这里的store/load是在同一个core上。lr/sc基础上还可以叠加上
+ order的语义，有acquire和release, acquire表示之后的指令不能在本条指令前投机执行
+ 完成，release表示之前的指令不能在本条指令之后执行完成。
+
+ 如上只是初步看lr/sc，详细的指令定义还需要各种限制堵住各种出问题的情况。这里更多
+ 的细节就是lr可以有多个，但是store只和相同core上的上一个匹配，sc只要有就会消除之
+ 前的flag，不管这个sc是成功还是失败，sc成功的情况只有上面一种，但是失败的情况就
+ 很多了，sc和上一个lr的地址不匹配会失败，sc之前已经有来自其他core或者设备做完相
+ 同地址的sc，本core上这个sc也是失败，同一个core上，sc和lr中间有sc，那么后一个sc
+ 也是失败。
+
+ 假设代码里lr/sc的操作地址都是一样，那么用lr/sc实现原子操作的基本逻辑就是循环的
+ 执行一段代码，在最后sc写入的时候，如果成功，这段代码做的原子操作就成功，如果sc
+ 写入失败，就重复执行整段代码。准备了半天都是为了sc的写内存，如果写入失败(另一个
+ core的sc写入成功)，就返回去重新尝试。下面的是一个伪代码写的原子加1实现，lr把addr
+ 地址上的数据读入rd，add把rd里的数据加1写入rs1，sc指令把rs1里的数据写到addr这个
+ 地址上，rx存储sc是否成功，rx为1，表示没有写成功，跳到lr重新做整套操作。如果，在
+ 弱内存序的机器上，还要加上必要的barrier，以保证sc和lr的顺序。
+```
+	core 1                   core 2
+
+      lable A:                 lable A:
+	lr rd, [addr]            lr rd, [addr]
+	add rs1, rd, #1          add rs1, rd, #1
+	sc rs1, [addr], rx       sc rs1, [addr], rx
+	beq rx, 1, lable A       beq rx, 1, lable A
+```
+
+ riscv上，lr/sc主要是用来实现CAS原子操作。Linux内核里riscv cmpxchg是这样实现的，
+ 和spec里提供的代码类似，多个一个fence。实际上最后更新内存的只是sc.w.rl这个指令，
+ 多核之间对于同一内存位置，sc之间，一个成功，另外一个就必须失败，这个是硬件语义
+ 保证的。相关的代码在arch/riscv/include/asm/cmpxchg.h
+```
+#define __cmpxchg(ptr, old, new, size)					\
+({									\
+	__typeof__(ptr) __ptr = (ptr);					\
+	__typeof__(*(ptr)) __old = (old);				\
+	__typeof__(*(ptr)) __new = (new);				\
+	__typeof__(*(ptr)) __ret;					\
+	register unsigned int __rc;					\
+	switch (size) {							\
+	[...]
+	case 8:								\
+		__asm__ __volatile__ (					\
+			"0:	lr.d %0, %2\n"				\
+			"	bne %0, %z3, 1f\n"			\
+			"	sc.d.rl %1, %z4, %2\n"			\
+			"	bnez %1, 0b\n"				\
+			"	fence rw, rw\n"				\
+			"1:\n"						\
+			: "=&r" (__ret), "=&r" (__rc), "+A" (*__ptr)	\
+			: "rJ" (__old), "rJ" (__new)			\
+			: "memory");					\
+		break;							\
+	[...]
+	__ret;								\
+})
+```
+
+ riscv里的AMO指令是单原子指令对内存做更新，有swap/add/and/xor/or/max/min操作。
+
+qemu实现
+--------
+
+ qemu实现lr/sc的代码在：qemu/target/riscv/insn_trans/trans_rva.c.inc。cpu的结构体
+ 里会增加load_res和load_val。lr指令会把load的地址保存到load_res，把load的数据保存
+ 到load_val，sc先判断store的地址是否和load_res相同，如果不相同，store失败，写1到
+ rd寄存器，并清掉load_res，如果相等，使用一个host上cmpxchg原子指令做store操作。
+
+ sc的实现使用了原子CAS，这个操作的语义和上面内核里的是一样的:
+```
+ tcg_gen_atomic_cmpxchg_i64(retv, addr, cmpv, newv, idx, memop)
+```
+ 如果是addr上的数据和cmpv相等，就把newv写入addr的位置，retv用来存储addr地址上原来
+ 的值。qemu里sc的这个代码的意思就是，如果load_res这个地址上的值和load_val相等，就
+ 把src2这个寄存器上的数据写入load_res地址，dest保存load_res地址上原来的值。
+```
+    tcg_gen_atomic_cmpxchg_tl(dest, load_res, load_val, src2,
+                              ctx->mem_idx, mop);
+```
+
+ lr把地址和数据都保存起来，是为了实现多个sc执行时可以互斥，sc的实现里使用了原子
+ CAS指令，如果保存的load_val和内存上的不一样，说明之前有sc改了内存上的数据，当前
+ 的sc里的CAS就不会往内存写数据，后续的逻辑会返回当前sc失败。如果保存的load_val和
+ 内存上的一样, 说明之前没有sc写这个地址，或者之前有sc对这个地址写了一个相同的值。
+ 如果是前者，sc正常写入，如果是后者，sc的写入可能会观测到两种可能的结果。
+
+ 我们具体考虑下:
+
+ 当core1刚执行完tcg_gen_atomic_cmpxchg_tl, 写入一个相同的值，还没有执行tcg_gen_movi_tl(load_res, -1)，
+ core2执行tcg_gen_atomic_cmpxchg_tl写入一个新值，由于load_res没有被更新，core2是
+ 可以写入这个新值的。如果，core1执行了tcg_gen_atomic_cmpxchg_tl, 写入一个相同的值，
+ 并且也执行了tcg_gen_movi_tl(load_res, -1)，core2如果这个时候执行tcg_gen_atomic_cmpxchg_tl，
+ 会执行失败。这是不是qemu这个地方的一个bug？
+
+ 不管sc成功还是失败都跳到l2 lable，这个地方会把load_res清掉。
+
+ qemu里对AMO的实现比较简单，就是直接映射到host上的对应原子指令实现。
+
+原子指令里的内存序
+-------------------
+
+ lr/sc和AMO的指令都支持在上叠加内存序的约束。aq表示本条执行之后的访存指令不能越
+ 过本条指令完成，rl表示本条指令不能越过之前的访存指令完成。
+
+ qemu的实现中，对于AMO的指令都没有对aq和rl做处理，对于lr/sc指令，是加了相关的
+ memory barrier，aq是TCG_BAR_LDAQ，rl是TCG_BAR_STRL，但是对于sc的正常处理分支，
+ 由于使用了host的atomic_cmpxchg指令，也是没有对aq/rl做显示的处理。
+
+ 内存序还有待深入分析。

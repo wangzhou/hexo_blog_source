@@ -1,7 +1,7 @@
 ---
 title: qemu iommu模拟思路分析
 date: 2021-08-21 09:55:36
-tags: [qemu, iommu]
+tags: [QEMU, iommu]
 description: "本文介绍qemu对iommu模拟的思路，我们以qemu里smmuv3设备驱动为例。"
 categories:
 ---

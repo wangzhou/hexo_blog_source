@@ -1,7 +1,7 @@
 ---
 title: qemu tcg跳转的处理
 date: 2022-01-26 23:12:17
-tags: [qemu, 虚拟化]
+tags: [QEMU, 虚拟化]
 description: "本文分析qemu tcg中跳转指令模拟，以riscv平台作为例子。"
 categories:
 ---

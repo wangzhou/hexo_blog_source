@@ -1,0 +1,569 @@
+---
+title: Linux内核riscv head.S分析
+date: 2022-05-16 19:24:25
+tags: [riscv, Linux内核，计算机体系结构]
+description: "head.S是Linux内核最初阶段对机器初始化的代码，和体系构架相关，其中定义
+了三个符号：_start, _start_kernel, reset_regs。主要问题集中在：1. 内存初始化? 2. 怎么起多核？
+目前只看了单核启动相关的东西，而且所有不常用的内核配置先跳过不看。笔记在注释里，以n:开始。
+分析基于Linux 5.17-rc3"
+categories:
+---
+
+```
+/* n: 这个是 kernel execute in place, 就是可以从一个持久存储里上直接启动内核 */
+#ifdef CONFIG_XIP_KERNEL
+.macro XIP_FIXUP_OFFSET reg
+	REG_L t0, _xip_fixup
+	add \reg, \reg, t0
+.endm
+.macro XIP_FIXUP_FLASH_OFFSET reg
+	la t0, __data_loc
+	REG_L t1, _xip_phys_offset
+	sub \reg, \reg, t1
+	add \reg, \reg, t0
+.endm
+_xip_fixup: .dword CONFIG_PHYS_RAM_BASE - CONFIG_XIP_PHYS_ADDR - XIP_OFFSET
+_xip_phys_offset: .dword CONFIG_XIP_PHYS_ADDR + XIP_OFFSET
+#else
+.macro XIP_FIXUP_OFFSET reg
+.endm
+.macro XIP_FIXUP_FLASH_OFFSET reg
+.endm
+#endif /* CONFIG_XIP_KERNEL */
+
+/*
+ * n: 定义了一个代码段：.section ".head.test","ax"
+ *    前面是名字，后面是属性，a表示可分配？x表示可执行
+ */
+__HEAD
+/*
+ * n: ENTRY这个宏定义了一个叫_start的符号，一直到对应的END处。在END处也生成了对应
+ * 符号的size：.size name, .-name
+ */
+ENTRY(_start)
+	/*
+	 * Image header expected by Linux boot-loaders. The image header data
+	 * structure is described in asm/image.h.
+	 * Do not modify it without modifying the structure and all bootloaders
+	 * that expects this header format!!
+	 */
+#ifdef CONFIG_EFI
+	/*
+	 * n: 这里是riscv上UEFI和内核约定格式，具体的说明可以看内核文档:
+	 *    linux/Documentation/riscv/boot-image-header.rst
+	 *    _start最开头的格式要符合如上文档里的定义。
+	 */
+	/*
+	 * This instruction decodes to "MZ" ASCII required by UEFI.
+	 */
+	c.li s4,-13
+	j _start_kernel
+#else
+	/* jump to start kernel */
+	j _start_kernel
+	/* reserved */
+	.word 0
+#endif
+
+	.balign 8
+	/*
+	 * n: M mode下MMU是不开的，所以，一般内核都不开这个，而是S mode，
+	 *    一般是bios跑在M mode，在进入内核的时候把机器切到S mode。
+	 */
+#ifdef CONFIG_RISCV_M_MODE
+	/* Image load offset (0MB) from start of RAM for M-mode */
+	.dword 0
+#else
+#if __riscv_xlen == 64
+	/* n: 把Image加载到内存2MB偏移处 */
+	/* Image load offset(2MB) from start of RAM */
+	.dword 0x200000
+#else
+	/* Image load offset(4MB) from start of RAM */
+	.dword 0x400000
+#endif
+#endif
+	/* Effective size of kernel image */
+	.dword _end - _start
+	.dword __HEAD_FLAGS
+	.word RISCV_HEADER_VERSION
+	.word 0
+	.dword 0
+	.ascii RISCV_IMAGE_MAGIC
+	.balign 4
+	.ascii RISCV_IMAGE_MAGIC2
+#ifdef CONFIG_EFI
+	.word pe_head_start - _start
+pe_head_start:
+
+	__EFI_PE_HEADER
+#else
+	.word 0
+#endif
+
+.align 2
+#ifdef CONFIG_MMU
+relocate:
+	/* n: 把kernel_map这个符号的地址放到a1里 */
+	/* Relocate return address */
+	la a1, kernel_map
+	XIP_FIXUP_OFFSET a1
+	/*
+	 * n: 把内核Image的虚拟地址放到a1里，kernle_map.virt_addr这个地址在setup_vm
+	 *    里确定，是KERNEL_LINK_ADDR，一般的就是0xffffffff80000000这个地址，
+	 *    就是内核的起始地址，在Documentation/riscv/vm-layout.rst里也有说明。
+	 */
+	REG_L a1, KERNEL_MAP_VIRT_ADDR(a1)
+	/*
+	 * n: _start这个符号的地址是在内核链接脚本里定义的arch/riscv/kernel/vmlinux.lds.S:
+	 *
+	 *    . = LOAD_OFFSET;
+	 *    _start = .;
+	 *
+	 *    LOAD_OFFSET是KERNEL_LINK_ADDR的封装。但是，这里加载到a2里的值并不是
+	 *    链接脚本里静态定义的值，la是一个伪指令，要被编译器替换成auipc和ld
+	 *    指令，编译器处理auip时使用地址无关的处理方式，当前PC和_start符号的
+	 *    相对偏移是编译时已知的，所以，地址无关的处理方式使用和当前PC的偏移
+	 *    得到运行是_start的具体地址。这里还没有开MMU，得到的是_start的物理地址，
+	 *    也就是内核被加载到的物理地址。qemu virt机器上，这个地址是0x80200000
+	 *
+	 *    一个符号是不是位置无关(PIC)，可以由编译器的选项控制，比如-fPIC，从
+	 *    汇编指令的角度看，la、auipc编译出来的就是位置无关的代码。
+	 */
+	la a2, _start
+	/* n: a1放内核Image加载虚拟地址和物理地址的差值 */
+	sub a1, a1, a2
+	/* n: 调用relocate的时候ra放的物理地址，这里加一个偏移得到对应的虚拟地址 */
+	add ra, ra, a1
+
+	/* Point stvec to virtual address of intruction after satp write */
+	la a2, 1f
+	/* n: 得到label 1的虚拟地址，放到a2里 */
+	add a2, a2, a1
+	csrw CSR_TVEC, a2
+
+	/* Compute satp for kernel page tables, but don't load it yet */
+	/* n: a0传入页表page，这里计算得到页表基地址，注意这个是物理地址 */
+	srl a2, a0, PAGE_SHIFT
+	la a1, satp_mode
+	REG_L a1, 0(a1)
+	or a2, a2, a1
+
+	/*
+	 * n: 这几个pg_dir的逻辑，先看trampoline_pg_dir和early_pg_dir。看setup_vm
+	 *    里的逻辑，trampoline_pg_dir的页表只是覆盖了内核Image的开头2MB。
+	 *
+	 *    这里先把trampoline_pg_dir配置成当前页表。SATP是页表的基地址寄存器，
+	 *    页表相关信息在这里配置，包括：页表的种类、ASID和页表基地址。
+	 */
+	/*
+	 * Load trampoline page directory, which will cause us to trap to
+	 * stvec if VA != PA, or simply fall through if VA == PA.  We need a
+	 * full fence here because setup_vm() just wrote these PTEs and we need
+	 * to ensure the new translations are in use.
+	 */
+	la a0, trampoline_pg_dir
+	XIP_FIXUP_OFFSET a0
+	srl a0, a0, PAGE_SHIFT
+	or a0, a0, a1
+	sfence.vma
+	/* n: 这条指令后MMU就生效了，CPU访问内存都要翻译下 */
+	csrw CSR_SATP, a0
+.align 2
+1:
+	/*
+	 * n: CPU在当前的PC上取这条指令的时候，会发生异常。CPU的执行逻辑是，先
+	 *    尝试把当前PC(还是物理地址)做翻译，trampoline_pg_dir页表里没有PC
+	 *    相关的页表项导致CPU异常，CPU跳到异常向量入口执行指令，这个异常向量
+	 *    的地址就是上面配置到CSR_TVEC里的值，上面在配置的时候已经把label 1
+	 *    的虚拟地址计算出来，并把这个虚拟地址写到了CSR_TVEC。因为已经打开
+	 *    MMU，CPU在执行异常向量地址上的指令时，先通过MMU得到label 1的物理地
+	 *    址，然后再次执行下面的指令。
+	 *
+	 *    需要注意的是，当前PC已经是虚拟地址了，这样相对寻址得到.Lsecondary_park
+	 *    的虚拟地址，a0里是.Lsecondary_park的虚拟地址。
+	 */
+	/* Set trap vector to spin forever to help debug */
+	la a0, .Lsecondary_park
+	csrw CSR_TVEC, a0
+
+	/* Reload the global pointer */
+.option push
+.option norelax
+	/* n: 同理，这里重新加载下__global_pointer$，gp里放的是虚拟地址了 */
+	la gp, __global_pointer$
+.option pop
+
+	/*
+	 * Switch to kernel page tables.  A full fence is necessary in order to
+	 * avoid using the trampoline translations, which are only correct for
+	 * the first superpage.  Fetching the fence is guaranteed to work
+	 * because that first superpage is translated the same way.
+	 */
+	/* n: 把页表改成early_pg_dir，这个页表覆盖了全部内核Image和DT的内存 */
+	csrw CSR_SATP, a2
+	sfence.vma
+
+	/*
+	 * n: 跳转到ra，call relocate的下一条指令的地址，这个地址已经在上面被
+	 *    改成虚拟地址。
+	 */
+	ret
+#endif /* CONFIG_MMU */
+#ifdef CONFIG_SMP
+	.global secondary_start_sbi
+secondary_start_sbi:
+	/* Mask all interrupts */
+	csrw CSR_IE, zero
+	csrw CSR_IP, zero
+
+	/* Load the global pointer */
+	.option push
+	.option norelax
+		la gp, __global_pointer$
+	.option pop
+
+	/*
+	 * Disable FPU to detect illegal usage of
+	 * floating point in kernel space
+	 */
+	li t0, SR_FS
+	csrc CSR_STATUS, t0
+
+	/* Set trap vector to spin forever to help debug */
+	la a3, .Lsecondary_park
+	csrw CSR_TVEC, a3
+
+	/* a0 contains the hartid & a1 contains boot data */
+	li a2, SBI_HART_BOOT_TASK_PTR_OFFSET
+	XIP_FIXUP_OFFSET a2
+	add a2, a2, a1
+	REG_L tp, (a2)
+	li a3, SBI_HART_BOOT_STACK_PTR_OFFSET
+	XIP_FIXUP_OFFSET a3
+	add a3, a3, a1
+	REG_L sp, (a3)
+
+.Lsecondary_start_common:
+
+#ifdef CONFIG_MMU
+	/* Enable virtual memory and relocate to virtual address */
+	la a0, swapper_pg_dir
+	XIP_FIXUP_OFFSET a0
+	call relocate
+#endif
+	call setup_trap_vector
+	tail smp_callin
+#endif /* CONFIG_SMP */
+
+.align 2
+setup_trap_vector:
+	/* n: handle_exception定义在arch/riscv/kernel/entry.S里 */
+	/* Set trap vector to exception handler */
+	la a0, handle_exception
+	csrw CSR_TVEC, a0
+
+	/*
+	 * Set sup0 scratch register to 0, indicating to exception vector that
+	 * we are presently executing in kernel.
+	 */
+	csrw CSR_SCRATCH, zero
+	ret
+
+.align 2
+.Lsecondary_park:
+	/* We lack SMP support or have too many harts, so park this hart */
+	wfi
+	j .Lsecondary_park
+
+END(_start)
+
+ENTRY(_start_kernel)
+	/*
+	 * n: 配置相关的CSR寄存器，mask掉中断，调试的时候注意，M mode的相关bit
+	 *    是清不掉的
+	 */
+	/* Mask all interrupts */
+	csrw CSR_IE, zero
+	csrw CSR_IP, zero
+
+#ifdef CONFIG_RISCV_M_MODE
+	/* flush the instruction cache */
+	fence.i
+
+	/* Reset all registers except ra, a0, a1 */
+	call reset_regs
+
+	/* n: pmp的操作，pmp是M mode的地址保护机制，S mode的时候用MMU */
+	/*
+	 * Setup a PMP to permit access to all of memory.  Some machines may
+	 * not implement PMPs, so we set up a quick trap handler to just skip
+	 * touching the PMPs on any trap.
+	 */
+	la a0, pmp_done
+	csrw CSR_TVEC, a0
+
+	li a0, -1
+	csrw CSR_PMPADDR0, a0
+	li a0, (PMP_A_NAPOT | PMP_R | PMP_W | PMP_X)
+	csrw CSR_PMPCFG0, a0
+.align 2
+pmp_done:
+
+	/* n: 得到当前的cpu id */
+	/*
+	 * The hartid in a0 is expected later on, and we have no firmware
+	 * to hand it to us.
+	 */
+	csrr a0, CSR_MHARTID
+#endif /* CONFIG_RISCV_M_MODE */
+
+	/*
+	 * n: .option是给riscv编译器看的，push就是保存编译器当前的配置，比如，
+	 *    下面的norelax就是一个编译器的配置，编译器处理push就是把它自己目前
+	 *    编译代码用的配置先存起来，之后再用.option pop来恢复。
+	 */
+	/* Load the global pointer */
+.option push
+.option norelax
+	/*
+	 * n: gp是riscv的一个全局寄存器，这里把__global_pointer$这个符号的地址
+	 *    存到gp里也是一个编译器的优化手段，编译器后续可以使用这个地址做地址
+	 *    索引，编译器会自动在编译生成的汇编中使用gp。在MMU起来之前，还没法
+	 *    使用虚拟地址，所以就使用相对gp的相对寻址方式。
+	 */
+	la gp, __global_pointer$
+.option pop
+	
+	/* n: 禁用浮点 */
+	/*
+	 * Disable FPU to detect illegal usage of
+	 * floating point in kernel space
+	 */
+	li t0, SR_FS
+	csrc CSR_STATUS, t0
+
+#ifdef CONFIG_RISCV_BOOT_SPINWAIT
+	li t0, CONFIG_NR_CPUS
+	/*
+	 * n: cpu id没有超过最大范围，就继续跑，否则直接跳到Lsecondary_park，
+	 *    这里会停在wfi
+	 */
+	blt a0, t0, .Lgood_cores
+	tail .Lsecondary_park
+.Lgood_cores:
+
+	/* The lottery system is only required for spinwait booting method */
+#ifndef CONFIG_XIP_KERNEL
+	/* n: hart_lottery是外部定义的一个原子变量，在arch/riscv/kernel/setup.c */
+	/* Pick one hart to run the main boot sequence */
+	la a3, hart_lottery
+	li a2, 1
+	/* n: 把a2的值和a3地址上的值相加，并存入a3地址，a3地址上原来的值写入a3 */
+	amoadd.w a3, a2, (a3)
+	/* n: a3不是0就要跳转，这里a3在上一步中更新成0，所以下面走到bss清理的逻辑 */
+	bnez a3, .Lsecondary_start
+
+#else
+	/* hart_lottery in flash contains a magic number */
+	la a3, hart_lottery
+	mv a2, a3
+	XIP_FIXUP_OFFSET a2
+	XIP_FIXUP_FLASH_OFFSET a3
+	lw t1, (a3)
+	amoswap.w t0, t1, (a2)
+	/* first time here if hart_lottery in RAM is not set */
+	beq t0, t1, .Lsecondary_start
+
+#endif /* CONFIG_XIP */
+#endif /* CONFIG_RISCV_BOOT_SPINWAIT */
+
+#ifdef CONFIG_XIP_KERNEL
+	la sp, _end + THREAD_SIZE
+	XIP_FIXUP_OFFSET sp
+	mv s0, a0
+	call __copy_data
+
+	/* Restore a0 copy */
+	mv a0, s0
+#endif
+
+#ifndef CONFIG_XIP_KERNEL
+	/* Clear BSS for flat non-ELF images */
+	la a3, __bss_start
+	la a4, __bss_stop
+	ble a4, a3, clear_bss_done
+clear_bss:
+	REG_S zero, (a3)
+	add a3, a3, RISCV_SZPTR
+	blt a3, a4, clear_bss
+clear_bss_done:
+#endif
+	/* n：a0放cpu id, a1放DTB的地址，这个从openSBI代码里可以看到 */
+	/* Save hart ID and DTB physical address */
+	mv s0, a0
+	mv s1, a1
+
+	/* n: boot_cpu_hartid全局变量，初始化是0 */
+	la a2, boot_cpu_hartid
+	/* n: 这个是XIP用来调整地址的，没有XIP这个是空，可以不看 */
+	XIP_FIXUP_OFFSET a2
+	REG_S a0, (a2)
+
+	/*
+	 * n: sp保存栈指针，这里是物理地址，不过init_thread_union在什么地方定义？
+	 *    init_thread_union这里是thread_info的基地址，thread_info在task_struct
+	 *    里，存放硬件架构相关的信息，内核栈在内存中的位置在thread_info上方，
+	 *    和thread_info紧邻。THREAD_SIZE就是内核栈大小，64BIT下是PAGE_SIZE * 4
+	 */
+	/* Initialize page tables and relocate to virtual addresses */
+	la sp, init_thread_union + THREAD_SIZE
+	XIP_FIXUP_OFFSET sp
+#ifdef CONFIG_BUILTIN_DTB
+	la a0, __dtb_start
+	XIP_FIXUP_OFFSET a0
+#else
+	/* n: dtb地址给a0，为后面call setup_vm做入参 */
+	mv a0, s1
+#endif /* CONFIG_BUILTIN_DTB */
+	/*
+	 * n: 建立初始化阶段的页表，start_kernel里的mm_init会创建正式页表，
+	 *    setup_vm在arch/riscv/mm/init.c里，单独分析这块的逻辑。
+	 */
+	call setup_vm
+#ifdef CONFIG_MMU
+	/* n: setup_vm里会更新这个页表的总入口 */
+	la a0, early_pg_dir
+	XIP_FIXUP_OFFSET a0
+	/* n: relocate把setup_vm里创建的初始阶段页表配置给硬件 */
+	call relocate
+#endif /* CONFIG_MMU */
+	/* n: 把异常向量配置给硬件 */
+	call setup_trap_vector
+	/* Restore C environment */
+	/* n: tp, sp在这里赋值，tp是内核的task_struct的指针，sp是内核栈指针 */
+
+	la tp, init_task
+	la sp, init_thread_union + THREAD_SIZE
+
+#ifdef CONFIG_KASAN
+	call kasan_early_init
+#endif
+	/* Start the kernel */
+	call soc_early_init
+	/* n: 开始跑start_kernel，注意是单核在跑，多核启动逻辑另外分析 */
+	tail start_kernel
+
+#if CONFIG_RISCV_BOOT_SPINWAIT
+.Lsecondary_start:
+	/* Set trap vector to spin forever to help debug */
+	la a3, .Lsecondary_park
+	csrw CSR_TVEC, a3
+
+	slli a3, a0, LGREG
+	la a1, __cpu_spinwait_stack_pointer
+	XIP_FIXUP_OFFSET a1
+	la a2, __cpu_spinwait_task_pointer
+	XIP_FIXUP_OFFSET a2
+	add a1, a3, a1
+	add a2, a3, a2
+
+	/*
+	 * This hart didn't win the lottery, so we wait for the winning hart to
+	 * get far enough along the boot process that it should continue.
+	 */
+.Lwait_for_cpu_up:
+	/* FIXME: We should WFI to save some energy here. */
+	REG_L sp, (a1)
+	REG_L tp, (a2)
+	beqz sp, .Lwait_for_cpu_up
+	beqz tp, .Lwait_for_cpu_up
+	fence
+
+	tail .Lsecondary_start_common
+#endif /* CONFIG_RISCV_BOOT_SPINWAIT */
+
+END(_start_kernel)
+
+#ifdef CONFIG_RISCV_M_MODE
+ENTRY(reset_regs)
+	li	sp, 0
+	li	gp, 0
+	li	tp, 0
+	li	t0, 0
+	li	t1, 0
+	li	t2, 0
+	li	s0, 0
+	li	s1, 0
+	li	a2, 0
+	li	a3, 0
+	li	a4, 0
+	li	a5, 0
+	li	a6, 0
+	li	a7, 0
+	li	s2, 0
+	li	s3, 0
+	li	s4, 0
+	li	s5, 0
+	li	s6, 0
+	li	s7, 0
+	li	s8, 0
+	li	s9, 0
+	li	s10, 0
+	li	s11, 0
+	li	t3, 0
+	li	t4, 0
+	li	t5, 0
+	li	t6, 0
+	csrw	CSR_SCRATCH, 0
+
+#ifdef CONFIG_FPU
+	csrr	t0, CSR_MISA
+	/* n: 判断有没有浮点，如果没有，可以直接退出了 */
+	andi	t0, t0, (COMPAT_HWCAP_ISA_F | COMPAT_HWCAP_ISA_D)
+	beqz	t0, .Lreset_regs_done
+
+	/* n: 把status寄存器里浮点相关的两bit配置上 */
+	li	t1, SR_FS
+	csrs	CSR_STATUS, t1
+	fmv.s.x	f0, zero
+	fmv.s.x	f1, zero
+	fmv.s.x	f2, zero
+	fmv.s.x	f3, zero
+	fmv.s.x	f4, zero
+	fmv.s.x	f5, zero
+	fmv.s.x	f6, zero
+	fmv.s.x	f7, zero
+	fmv.s.x	f8, zero
+	fmv.s.x	f9, zero
+	fmv.s.x	f10, zero
+	fmv.s.x	f11, zero
+	fmv.s.x	f12, zero
+	fmv.s.x	f13, zero
+	fmv.s.x	f14, zero
+	fmv.s.x	f15, zero
+	fmv.s.x	f16, zero
+	fmv.s.x	f17, zero
+	fmv.s.x	f18, zero
+	fmv.s.x	f19, zero
+	fmv.s.x	f20, zero
+	fmv.s.x	f21, zero
+	fmv.s.x	f22, zero
+	fmv.s.x	f23, zero
+	fmv.s.x	f24, zero
+	fmv.s.x	f25, zero
+	fmv.s.x	f26, zero
+	fmv.s.x	f27, zero
+	fmv.s.x	f28, zero
+	fmv.s.x	f29, zero
+	fmv.s.x	f30, zero
+	fmv.s.x	f31, zero
+	/* n: 清空浮点控制寄存器fcsr */
+	csrw	fcsr, 0
+	/* note that the caller must clear SR_FS */
+#endif /* CONFIG_FPU */
+.Lreset_regs_done:
+	ret
+END(reset_regs)
+#endif /* CONFIG_RISCV_M_MODE */
+```
