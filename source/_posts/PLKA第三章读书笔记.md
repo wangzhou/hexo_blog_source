@@ -1,10 +1,12 @@
 ---
 title: PLKA第三章读书笔记
-date: 2021-12-20 23:29:56
-tags: [内存管理, Linux内核]
-description: "本文是PLKA第三章的阅读笔记，第三章主要讲物理内存的分配。本文参考PLKA分析最新
-      的内核代码，并不全是PLKA内容的整理，代码分析基于5.10。"
+tags:
+  - 内存管理
+  - Linux内核
+description: 本文是PLKA第三章的阅读笔记，第三章主要讲物理内存的分配。本文参考PLKA分析最新 的内核代码，并不全是PLKA内容的整理，代码分析基于5.10。
 categories: read
+abbrlink: dc195fe2
+date: 2021-12-20 23:29:56
 ---
 
 基础数据结构

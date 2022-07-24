@@ -1,13 +1,16 @@
 ---
 title: Linux内核scatterlist用法
+tags:
+  - Linux内核
+  - scatterlist
+description: >-
+  本文主要讲linux kernel里scatterlist的使用方法，有的设备驱动需要使用这个接口编程。 本文从设备的硬件结构，kernel
+  scatterlist的原理，以及scatterlist API说明应该怎么 用这个接口,
+  很多是自己的初步理解。下面的两篇文章都是讲scatterlist的，可以参考看下:
+  http://www.wowotech.net/memory_management/scatterlist.html
+  https://lwn.net/Articles/234617/ lwn的文章讲的已经比较好了，wowo的文章讲了数据结构，但是基本上没有把逻辑讲完整。
+abbrlink: a94be268
 date: 2021-07-05 22:33:36
-tags: [Linux内核, scatterlist]
-description: "本文主要讲linux kernel里scatterlist的使用方法，有的设备驱动需要使用这个接口编程。
-本文从设备的硬件结构，kernel scatterlist的原理，以及scatterlist API说明应该怎么
-用这个接口, 很多是自己的初步理解。下面的两篇文章都是讲scatterlist的，可以参考看下:
-http://www.wowotech.net/memory_management/scatterlist.html
-https://lwn.net/Articles/234617/
-lwn的文章讲的已经比较好了，wowo的文章讲了数据结构，但是基本上没有把逻辑讲完整。"
 categories:
 ---
 

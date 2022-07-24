@@ -1,8 +1,10 @@
 ---
 title: ssh笔记
+tags:
+  - shell
+description: 本文用来收集ssh使用的一些技巧
+abbrlink: 6501f3e2
 date: 2021-07-11 23:34:41
-tags: [shell]
-description: "本文用来收集ssh使用的一些技巧"
 categories:
 ---
 

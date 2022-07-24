@@ -1,8 +1,11 @@
 ---
 title: Hixxxx PCIe + SMMU bad performance debug
+tags:
+  - SMMU
+  - 软件性能
+description: 记录一个SMMU相关的性能问题的调试过程
+abbrlink: c8b64683
 date: 2021-07-11 23:16:26
-tags: [SMMU, 软件性能]
-description: "记录一个SMMU相关的性能问题的调试过程"
 categories:
 ---
 

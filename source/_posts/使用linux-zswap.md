@@ -1,8 +1,11 @@
 ---
 title: 使用linux zswap
+tags:
+  - Linux内核
+  - zswap
+description: 本文简单介绍Linux zswap的使用方式
+abbrlink: a9770475
 date: 2021-06-27 18:02:47
-tags: [Linux内核, zswap]
-description: "本文简单介绍Linux zswap的使用方式"
 ---
 
 zswap是Linux内核里压缩swap内存的一个特性，他可以把需要swap到swap设备上内存先压缩

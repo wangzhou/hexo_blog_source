@@ -1,11 +1,15 @@
 ---
 title: qemu qom分析
+tags:
+  - QEMU
+  - 面向对象
+description: >-
+  qemu里使用面向对象的模型来模拟相关的元素，可以想象这样的模拟是很合理的，比如，
+  用device描述一个设备的基类，pci_device可以继承device，然后vfio的pci设备又可以
+  继承pci_device，同时一个用纯用软件模拟的pci网络设备也可以继承pci_device。
+  本文描述这个基于面向对象的思路构建起来的qemux模型。分析基于qemu 5.2.92版本。
+abbrlink: 7a2f9add
 date: 2021-07-26 14:12:03
-tags: [QEMU, 面向对象]
-description: "qemu里使用面向对象的模型来模拟相关的元素，可以想象这样的模拟是很合理的，比如，
-用device描述一个设备的基类，pci_device可以继承device，然后vfio的pci设备又可以
-继承pci_device，同时一个用纯用软件模拟的pci网络设备也可以继承pci_device。
-本文描述这个基于面向对象的思路构建起来的qemux模型。分析基于qemu 5.2.92版本。"
 categories:
 ---
 

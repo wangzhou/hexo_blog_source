@@ -1,8 +1,10 @@
 ---
 title: KAE笔记
+tags:
+  - openssl engine
+description: KAE是华为KunPeng服务器上加速器模块对应的openssl engine实现。本文是KAE的学习笔记。
+abbrlink: 996a9d74
 date: 2021-06-20 23:19:27
-tags: [openssl engine]
-description: "KAE是华为KunPeng服务器上加速器模块对应的openssl engine实现。本文是KAE的学习笔记。"
 ---
 
 梳理KAE实现Openssl engine的基本逻辑。本文基于的KAE代码在这个位置:

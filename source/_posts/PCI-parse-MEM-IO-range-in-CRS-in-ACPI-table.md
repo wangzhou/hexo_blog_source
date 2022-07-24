@@ -1,9 +1,13 @@
 ---
 title: PCI parse MEM/IO range in _CRS in ACPI table
+tags:
+  - PCIe
+  - Linux内核
+description: >-
+  Linux PCI code parses MEM/IO range, which are described in _CRS method in ACPI
+  DSDT table. This document tries to share an analysis about this part of code.
+abbrlink: 68a70987
 date: 2021-07-11 23:36:08
-tags: [PCIe, Linux内核]
-description: "Linux PCI code parses MEM/IO range, which are described in _CRS method in ACPI
-DSDT table. This document tries to share an analysis about this part of code."
 categories:
 ---
 

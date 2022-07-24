@@ -1,8 +1,12 @@
 ---
 title: qemu虚拟机通过tun/tap上网
+tags:
+  - 虚拟化
+  - 网络
+  - QEMU
+description: 在学习perf的时候，需要使的qemu虚拟机可以上网，下面是上网的设置过程
+abbrlink: a95aba1
 date: 2021-07-17 11:17:00
-tags: [虚拟化, 网络, QEMU]
-description: "在学习perf的时候，需要使的qemu虚拟机可以上网，下面是上网的设置过程"
 categories:
 ---
 

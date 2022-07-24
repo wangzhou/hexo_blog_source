@@ -1,8 +1,10 @@
 ---
 title: GIC ITS学习笔记(一)
+tags:
+  - GIC
+description: N年前分析ARM GIC代码的一个笔记
+abbrlink: f2188acc
 date: 2021-07-11 23:43:41
-tags: [GIC]
-description: "N年前分析ARM GIC代码的一个笔记"
 categories:
 ---
 

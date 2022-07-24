@@ -1,8 +1,11 @@
 ---
 title: Add CentOS yum repo in Redhat system
+tags:
+  - 包管理
+  - RPM/YUM
+description: This document shows how to add yum repo resource for a Redhat/CentOS system
+abbrlink: a3197202
 date: 2021-07-05 22:30:31
-tags: [包管理, RPM/YUM]
-description: "This document shows how to add yum repo resource for a Redhat/CentOS system"
 categories:
 ---
 

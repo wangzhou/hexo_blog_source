@@ -1,8 +1,11 @@
 ---
 title: PCI ACPI笔记1
+tags:
+  - PCIe
+  - ACPI
+description: This note talks about some basic knowledge about ACPI and PCI.
+abbrlink: 9919e89b
 date: 2021-07-17 10:47:28
-tags: [PCIe, ACPI]
-description: "This note talks about some basic knowledge about ACPI and PCI."
 categories:
 ---
 

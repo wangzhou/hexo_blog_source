@@ -1,9 +1,13 @@
 ---
 title: PCI FLR analysis
+tags:
+  - PCIe
+  - 计算机体系结构
+description: >-
+  PCI协议里有function level reset的定义，实现FLR的设备可以提供function级别的复位。
+  本文梳理linux内核里和FLR相关的流程。本文可以作为设备复位设计的一个参考。
+abbrlink: faf884c6
 date: 2021-06-29 00:00:56
-tags: [PCIe, 计算机体系结构]
-description: "PCI协议里有function level reset的定义，实现FLR的设备可以提供function级别的复位。
-本文梳理linux内核里和FLR相关的流程。本文可以作为设备复位设计的一个参考。"
 categories:
 ---
 

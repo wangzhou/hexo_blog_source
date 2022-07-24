@@ -1,8 +1,10 @@
 ---
 title: Linux异步通知
+tags:
+  - Linux内核
+description: 本文是Linux异步通知的一个学习笔记，读者可以参看此文快速获得相关的知识。
+abbrlink: 60c51bec
 date: 2021-06-28 23:55:17
-tags: [Linux内核]
-description: "本文是Linux异步通知的一个学习笔记，读者可以参看此文快速获得相关的知识。"
 categories:
 ---
 

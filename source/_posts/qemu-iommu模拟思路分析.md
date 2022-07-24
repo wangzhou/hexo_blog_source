@@ -1,8 +1,11 @@
 ---
 title: qemu iommu模拟思路分析
+tags:
+  - QEMU
+  - iommu
+description: 本文介绍qemu对iommu模拟的思路，我们以qemu里smmuv3设备驱动为例。
+abbrlink: 5230085a
 date: 2021-08-21 09:55:36
-tags: [QEMU, iommu]
-description: "本文介绍qemu对iommu模拟的思路，我们以qemu里smmuv3设备驱动为例。"
 categories:
 ---
 

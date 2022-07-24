@@ -1,9 +1,11 @@
 ---
 title: Linux rsync备份数据
+tags:
+  - 运维
+  - shell
+description: '为了实现数据的实时备份，在linux可以使用rsync, 本文是使用rsync时的一个笔记 这里使用的系统是ubuntu 14.04'
+abbrlink: cfcf7e3f
 date: 2021-07-17 10:55:00
-tags: [运维, shell]
-description: "为了实现数据的实时备份，在linux可以使用rsync, 本文是使用rsync时的一个笔记
- 这里使用的系统是ubuntu 14.04"
 categories:
 ---
 

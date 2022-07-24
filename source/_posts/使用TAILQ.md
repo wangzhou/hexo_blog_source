@@ -1,8 +1,10 @@
 ---
 title: 使用TAILQ
+tags:
+  - 数据结构
+description: TAILQ是一个套公共的链表实现，我们可以直接使用。本文分析TAILQ的实现
+abbrlink: a6b302af
 date: 2021-06-20 23:16:01
-tags: [数据结构]
-description: "TAILQ是一个套公共的链表实现，我们可以直接使用。本文分析TAILQ的实现"
 ---
 
 TAILQ是BSD里实现的一套简单的链表，一般linux系统只要include sys/queue.h就可以使用。

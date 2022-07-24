@@ -1,9 +1,10 @@
 ---
 title: Linux syscon and regmap
+tags:
+  - Linux内核
+description: 本文简单介绍Linux内核里regmap和syscon的东西，N年前的笔记了。记得 这些东西主要是处理MMIO有多次map的情况
+abbrlink: b3dd80c4
 date: 2021-07-17 10:03:10
-tags: [Linux内核]
-description: "本文简单介绍Linux内核里regmap和syscon的东西，N年前的笔记了。记得
-这些东西主要是处理MMIO有多次map的情况"
 categories:
 ---
 

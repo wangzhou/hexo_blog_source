@@ -1,11 +1,13 @@
 ---
 title: mtrace使用笔记
+tags:
+  - 软件调试
+description: >-
+  mtrace是一个GNU C库中的内存检测工具，用以检测用户态程序内存泄露 (malloc, realloc,
+  free)。检测的原理为在程序开始时通过mtrace()为malloc等函数安装 handlers[1],
+  malloc等函数执行时就会把相应的信息写到指定文件中(由环境变量指定)[2]， 最后由一个perl脚本(/usr/bin/mtrace)解析信息。
+abbrlink: d5ac76ae
 date: 2021-07-17 11:24:05
-tags: [软件调试]
-description: "mtrace是一个GNU C库中的内存检测工具，用以检测用户态程序内存泄露
-(malloc, realloc, free)。检测的原理为在程序开始时通过mtrace()为malloc等函数安装
-handlers[1], malloc等函数执行时就会把相应的信息写到指定文件中(由环境变量指定)[2]，
-最后由一个perl脚本(/usr/bin/mtrace)解析信息。"
 categories:
 ---
 

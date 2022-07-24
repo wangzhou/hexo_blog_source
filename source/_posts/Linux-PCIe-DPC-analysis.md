@@ -1,8 +1,11 @@
 ---
 title: Linux PCIe DPC analysis
+tags:
+  - PCIe
+  - Linux内核
+description: 本文分析Linux内核PCIe DPC特性的软件架构
+abbrlink: 702cc8e8
 date: 2021-07-11 23:38:25
-tags: [PCIe, Linux内核]
-description: "本文分析Linux内核PCIe DPC特性的软件架构"
 categories:
 ---
 

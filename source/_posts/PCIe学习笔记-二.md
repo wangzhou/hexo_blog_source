@@ -1,8 +1,10 @@
 ---
 title: PCIe学习笔记(二)
+tags:
+  - PCIe
+description: '本文继续pci note 1, 介绍pci_create_root_bus函数, 内核版本为3.18-rc1'
+abbrlink: e336c4e1
 date: 2021-07-11 23:48:15
-tags: [PCIe]
-description: "本文继续pci note 1, 介绍pci_create_root_bus函数, 内核版本为3.18-rc1"
 categories:
 ---
 

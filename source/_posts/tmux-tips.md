@@ -1,9 +1,13 @@
 ---
 title: tmux tips
+tags:
+  - 开发工具
+  - tmux
+description: >-
+  tmux is useful tool in linux when you need to work in different windows. This
+  note tries to collect and share some tips when I am using tmux to work.
+abbrlink: dd20f22d
 date: 2021-07-05 22:23:32
-tags: [开发工具, tmux]
-description: "tmux is useful tool in linux when you need to work in different windows. This
-note tries to collect and share some tips when I am using tmux to work."
 categories:
 ---
 

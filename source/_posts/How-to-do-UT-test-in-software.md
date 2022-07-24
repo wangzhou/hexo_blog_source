@@ -1,10 +1,13 @@
 ---
 title: How to do UT test in software
+tags:
+  - 软件测试
+description: >-
+  UT test is one kind of basic software test. This document tries to share the
+  basic idea about UT test from author. The idea is not mutual and author does
+  not have much experience about UT.
+abbrlink: d4f2a16
 date: 2021-07-05 22:26:09
-tags: [软件测试]
-description: "UT test is one kind of basic software test. This document tries to share the
-basic idea about UT test from author. The idea is not mutual and author does not
-have much experience about UT."
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: linux kernel vfio mdev arch
+tags:
+  - Linux内核
+  - vfio
+description: This document shares the basic logic of linux vfio mdev driver
+abbrlink: e9c69e8f
 date: 2021-07-05 22:26:32
-tags: [Linux内核, vfio]
-description: "This document shares the basic logic of linux vfio mdev driver"
 categories:
 ---
 

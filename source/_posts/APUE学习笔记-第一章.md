@@ -1,9 +1,11 @@
 ---
 title: APUE学习笔记(第一章)
-date: 2021-07-17 10:48:13
-tags: [APUE]
-description: "APUE第一章笔记，好久以前的事了"
+tags:
+  - APUE
+description: APUE第一章笔记，好久以前的事了
 categories: read
+abbrlink: 423f3a3d
+date: 2021-07-17 10:48:13
 ---
 
 1. 每个进程有一个工作目录，所有相对目录都从这个工作目录开始解释。可以用chdir改

@@ -1,10 +1,15 @@
 ---
 title: PCI MSI parse in ACPI
+tags:
+  - PCIe
+  - ACPI
+description: >-
+  In server system, we often use ACPI table in UEFI to stort parametres of
+  system. For a PCIe subsystem, IORT table will be used to store configurations
+  of ITS, SMMU and RC. This document analyzes how to parse ITS configuration in
+  kernel.
+abbrlink: 21b6df7b
 date: 2021-07-11 23:36:48
-tags: [PCIe, ACPI]
-description: "In server system, we often use ACPI table in UEFI to stort parametres of system.
-For a PCIe subsystem, IORT table will be used to store configurations of ITS, SMMU
-and RC. This document analyzes how to parse ITS configuration in kernel."
 categories:
 ---
 

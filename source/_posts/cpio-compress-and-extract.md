@@ -1,8 +1,10 @@
 ---
 title: cpio compress and extract
+tags:
+  - shell
+description: 本文简单记录cpio.gz格式的压缩和解压缩命令
+abbrlink: 98894f7b
 date: 2021-07-11 23:37:35
-tags: [shell]
-description: "本文简单记录cpio.gz格式的压缩和解压缩命令"
 categories:
 ---
 

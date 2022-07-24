@@ -1,9 +1,11 @@
 ---
 title: Linux信号笔记
+tags:
+  - Linux内核
+  - 信号
+description: Linux中可以用信号来做通信，本文是对linux信号的一个使用总结。也会总结下APUE第10 章中关于信号的内容。
+abbrlink: ca4f2d7a
 date: 2021-06-27 18:10:30
-tags: [Linux内核, 信号]
-description: "Linux中可以用信号来做通信，本文是对linux信号的一个使用总结。也会总结下APUE第10
-章中关于信号的内容。"
 ---
 
 Linux里有进程，线程，基于此有进程组，线程组的概念。Linux内核把进程，线程做一样

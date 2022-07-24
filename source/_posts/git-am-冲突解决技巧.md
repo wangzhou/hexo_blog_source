@@ -1,8 +1,10 @@
 ---
 title: git am 冲突解决技巧
+tags:
+  - git
+description: 本文记录一种遇到git am冲突时的解决办法
+abbrlink: 3c148803
 date: 2021-07-05 22:34:58
-tags: [git]
-description: "本文记录一种遇到git am冲突时的解决办法"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: linux O_CLOEXEC标志位笔记
+tags:
+  - Linux内核
+  - 文件系统
+description: 本文介绍Linux O_CLOEXEC标志位的语意
+abbrlink: 4446f88f
 date: 2021-06-27 18:12:49
-tags: [Linux内核, 文件系统]
-description: "本文介绍Linux O_CLOEXEC标志位的语意"
 ---
 
 在linux系统中，open一个文件可以带上O_CLOEXEC标志位，这个表示位和用fcntl设置的

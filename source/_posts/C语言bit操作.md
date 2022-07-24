@@ -1,8 +1,10 @@
 ---
 title: C语言bit操作
+tags:
+  - C语言
+description: 本文记录C语言位运算的一些corner
+abbrlink: 6d03201d
 date: 2021-07-05 22:37:02
-tags: [C语言]
-description: "本文记录C语言位运算的一些corner"
 categories:
 ---
 #include <stdio.h>

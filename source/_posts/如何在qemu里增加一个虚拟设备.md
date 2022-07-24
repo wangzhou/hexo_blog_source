@@ -1,11 +1,15 @@
 ---
 title: 如何在qemu里增加一个虚拟设备
+tags:
+  - QEMU
+  - 虚拟化
+description: >-
+  本文介绍在qemu里增加一个虚拟设备的步骤。本文会以一个PCIe DMA engine设备为
+  例来介绍，我们定义这个设备的软硬件接口，并且按照这样的定义在qemu里实现这个
+  设备，最后我们实现这个设备的Linux内核驱动。使用qemu可以方便的调试Linux内核，
+  有了自定义的qemu设备，使用qemu调试与设备有关的问题也会变得比较方便。
+abbrlink: 6555a03f
 date: 2021-09-17 22:56:05
-tags: [QEMU, 虚拟化]
-description: "本文介绍在qemu里增加一个虚拟设备的步骤。本文会以一个PCIe DMA engine设备为
-      例来介绍，我们定义这个设备的软硬件接口，并且按照这样的定义在qemu里实现这个
-      设备，最后我们实现这个设备的Linux内核驱动。使用qemu可以方便的调试Linux内核，
-      有了自定义的qemu设备，使用qemu调试与设备有关的问题也会变得比较方便。"
 categories:
 ---
 

@@ -1,9 +1,15 @@
 ---
 title: PCI SMMU parse in ACPI
+tags:
+  - PCIe
+  - Linux内核
+  - ACPI
+description: >-
+  This document shares a code analysis based on Linux-v4.9 about how to parse
+  SMMU information in ACPI IORT table, and how does a PCIe device get its SMMUv3
+  device.
+abbrlink: 9dde42f2
 date: 2021-07-11 23:36:35
-tags: [PCIe, Linux内核, ACPI]
-description: "This document shares a code analysis based on Linux-v4.9 about how to parse SMMU
-information in ACPI IORT table, and how does a PCIe device get its SMMUv3 device."
 categories:
 ---
 

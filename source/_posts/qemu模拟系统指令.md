@@ -1,8 +1,11 @@
 ---
 title: qemu模拟系统指令
+tags:
+  - QEMU
+  - 虚拟化
+description: 本文分析qemu tcg里模拟系统指令的思路，比如模拟一个riscv的ecall指令。
+abbrlink: 98bd3a95
 date: 2022-01-26 23:10:58
-tags: [QEMU, 虚拟化]
-description: "本文分析qemu tcg里模拟系统指令的思路，比如模拟一个riscv的ecall指令。"
 categories:
 ---
 

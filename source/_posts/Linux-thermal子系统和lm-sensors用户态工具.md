@@ -1,8 +1,10 @@
 ---
 title: Linux thermal子系统和lm_sensors用户态工具
+tags:
+  - Linux内核
+description: 本文分析Linux thermal子系统的现状，以及可能与之配套使用的lm_sensors用户态工具的软件构架。提供给写thermal驱动的同学可以参考。
+abbrlink: e597e2ee
 date: 2021-06-27 17:59:41
-tags: [Linux内核]
-description: "本文分析Linux thermal子系统的现状，以及可能与之配套使用的lm_sensors用户态工具的软件构架。提供给写thermal驱动的同学可以参考。"
 ---
 
 1. Linux thermal驱动

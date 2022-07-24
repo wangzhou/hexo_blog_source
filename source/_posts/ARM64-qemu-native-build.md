@@ -1,8 +1,11 @@
 ---
 title: ARM64 qemu native build
+tags:
+  - QEMU
+  - 虚拟化
+description: 本文记录在ARM64平台上编译QEMU的过程
+abbrlink: 517dc1f6
 date: 2021-07-11 23:40:33
-tags: [QEMU, 虚拟化]
-description: "本文记录在ARM64平台上编译QEMU的过程"
 categories:
 ---
 

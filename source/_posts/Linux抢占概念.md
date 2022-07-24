@@ -1,9 +1,12 @@
 ---
 title: Linux抢占概念
+tags:
+  - Linux内核
+description: >-
+  这篇文章把linux内核里的preempt这个概念介绍的比较清楚:
+  http://news.eeworld.com.cn/mp/ymc/a52661.jspx 本文再把一些关键的点总结下。
+abbrlink: abd7cd0e
 date: 2021-06-20 23:18:11
-tags: [Linux内核]
-description: "这篇文章把linux内核里的preempt这个概念介绍的比较清楚:
-http://news.eeworld.com.cn/mp/ymc/a52661.jspx 本文再把一些关键的点总结下。"
 ---
 1. 抢占的概念
 -------------

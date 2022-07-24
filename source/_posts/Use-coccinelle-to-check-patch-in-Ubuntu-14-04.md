@@ -1,9 +1,12 @@
 ---
 title: Use coccinelle to check patch in Ubuntu 14.04
+tags:
+  - 软件开发
+description: >-
+  In Ubuntu14.04, when running coccinelle, it will fail. So we install it
+  manually to make patch check. This note helps to remember the steps.
+abbrlink: d2b5a282
 date: 2021-07-05 22:42:02
-tags: [软件开发]
-description: "In Ubuntu14.04, when running coccinelle, it will fail. So we install it manually
-to make patch check. This note helps to remember the steps."
 categories:
 ---
 

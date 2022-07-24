@@ -1,9 +1,12 @@
 ---
 title: qemu里增加trace的方法
+tags:
+  - QEMU
+description: >-
+  在调试qemu代码的时候可以在qemu的启动命令中增加--trace "xxx", 这样qemu代码
+  运行到这个地方就会把相关的内容打印出来，这个文档介绍怎么新加一个这样的trace点。
+abbrlink: b5567175
 date: 2021-07-26 14:08:22
-tags: [QEMU]
-description: "在调试qemu代码的时候可以在qemu的启动命令中增加--trace \"xxx\", 这样qemu代码
-运行到这个地方就会把相关的内容打印出来，这个文档介绍怎么新加一个这样的trace点。"
 categories:
 ---
 

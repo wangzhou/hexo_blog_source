@@ -1,10 +1,16 @@
 ---
 title: Linux workqueue分析
+tags:
+  - Linux内核
+description: >-
+  本文介绍Linux内核里workqueue的使用方法，分析workqueue具体的代码实现。
+  并且基于qemu虚拟机做简单的测试。本文的分析基于Linux主线代码v5.5, 分析参考了蜗窝科技的分析文章:
+  http://www.wowotech.net/irq_subsystem/workqueue.html
+  http://www.wowotech.net/irq_subsystem/cmwq-intro.html
+  http://www.wowotech.net/irq_subsystem/alloc_workqueue.html
+  http://www.wowotech.net/irq_subsystem/queue_and_handle_work.html
+abbrlink: 6f5b0f9e
 date: 2021-06-27 18:01:35
-tags: [Linux内核]
-description: "本文介绍Linux内核里workqueue的使用方法，分析workqueue具体的代码实现。
-并且基于qemu虚拟机做简单的测试。本文的分析基于Linux主线代码v5.5, 分析参考了蜗窝科技的分析文章:
-http://www.wowotech.net/irq_subsystem/workqueue.html http://www.wowotech.net/irq_subsystem/cmwq-intro.html http://www.wowotech.net/irq_subsystem/alloc_workqueue.html http://www.wowotech.net/irq_subsystem/queue_and_handle_work.html"
 ---
 
 1. workqueue基本使用方法

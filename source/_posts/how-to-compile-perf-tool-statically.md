@@ -1,8 +1,10 @@
 ---
 title: how to compile perf tool statically
+tags:
+  - perf
+description: 一个静态编译perf的流水帐
+abbrlink: 235c920b
 date: 2021-07-05 22:28:32
-tags: [perf]
-description: "一个静态编译perf的流水帐"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: autoconf/automake使用笔记
+tags:
+  - 软件开发
+  - autoconf
+description: 本文以一个简单的例子展示怎么使用autoconf/automake工具构建一个工程
+abbrlink: fd4a67a2
 date: 2021-07-17 11:22:30
-tags: [软件开发, autoconf]
-description: "本文以一个简单的例子展示怎么使用autoconf/automake工具构建一个工程"
 categories:
 ---
 

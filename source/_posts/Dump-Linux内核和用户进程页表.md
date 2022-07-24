@@ -1,8 +1,11 @@
 ---
 title: Dump Linux内核和用户进程页表
+tags:
+  - Linux内核
+  - 内存管理
+description: 本文介绍dump Linux内核和用户进程页表的办法
+abbrlink: 177ea8b1
 date: 2021-06-19 10:15:42
-tags: [Linux内核, 内存管理]
-description: "本文介绍dump Linux内核和用户进程页表的办法"
 ---
 
 1. dump 内核页表

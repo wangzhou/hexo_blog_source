@@ -1,9 +1,12 @@
 ---
 title: 使用hexo NexT搭建个人博客
+tags:
+  - 静态博客搭建
+description: >-
+  这篇文章记录一个简单个人博客的搭建过程，我们使用GitHub page + hexo + NexT主题的搭建方式。 整个搭建的环境是在一台arm64
+  ubuntu20.04机器上。
+abbrlink: 73f1d6bc
 date: 2021-06-18 23:36:31
-tags: [静态博客搭建]
-description: "这篇文章记录一个简单个人博客的搭建过程，我们使用GitHub page + hexo + NexT主题的搭建方式。
-整个搭建的环境是在一台arm64 ubuntu20.04机器上。"
 ---
 
 1. 基础逻辑说明

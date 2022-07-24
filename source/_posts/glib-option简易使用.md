@@ -1,11 +1,14 @@
 ---
 title: glib option简易使用
+tags:
+  - Linux用户态编程
+  - glib
+description: >-
+  Linux下命令行运行一个app时，可以通过中划线开头的参数给app传参数。app可以
+  使用getopt或者是getopt_long的方式解析输入参数，glib库同样提供一组参数配置、
+  解析的函数。使用glib库提供的解析方式写起代码来更简单一点，本文介绍一个基本 的使用方式。
+abbrlink: 89797dda
 date: 2021-08-11 21:09:35
-tags: [Linux用户态编程, glib]
-description: "Linux下命令行运行一个app时，可以通过中划线开头的参数给app传参数。app可以
-      使用getopt或者是getopt_long的方式解析输入参数，glib库同样提供一组参数配置、
-      解析的函数。使用glib库提供的解析方式写起代码来更简单一点，本文介绍一个基本
-      的使用方式。"
 categories:
 ---
 

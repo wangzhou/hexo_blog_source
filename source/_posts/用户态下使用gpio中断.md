@@ -1,10 +1,13 @@
 ---
 title: 用户态下使用gpio中断
+tags:
+  - Linux内核
+  - gpio
+description: >-
+  linux内核中的gpio驱动可以使用内核中提供的gpio驱动框架来实现(drivers/gpio/gpiolib.c)
+  该框架使用sys文件系统把gpio暴露给用户态程序使用，本文介绍怎么在用户态下使用 gpio提供的中断功能。在介绍使用的同时，介绍一些涉及到的内部的实现过程
+abbrlink: 99e8ef41
 date: 2021-07-17 11:09:20
-tags: [Linux内核, gpio]
-description: "linux内核中的gpio驱动可以使用内核中提供的gpio驱动框架来实现(drivers/gpio/gpiolib.c)
-该框架使用sys文件系统把gpio暴露给用户态程序使用，本文介绍怎么在用户态下使用
-gpio提供的中断功能。在介绍使用的同时，介绍一些涉及到的内部的实现过程"
 categories:
 ---
 

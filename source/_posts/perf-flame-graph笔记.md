@@ -1,8 +1,11 @@
 ---
 title: perf flame graph笔记
+tags:
+  - 软件调试
+  - perf
+description: 本文记录使用Linux下使用perf生成火焰图的方法
+abbrlink: 864090c1
 date: 2021-06-27 18:09:46
-tags: [软件调试, perf]
-description: "本文记录使用Linux下使用perf生成火焰图的方法"
 ---
 
 1. git clone https://github.com/brendangregg/FlameGraph

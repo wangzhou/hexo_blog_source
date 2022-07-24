@@ -1,8 +1,12 @@
 ---
 title: qemu里pci设备的热插拔
+tags:
+  - QEMU
+  - PCIe
+  - 虚拟化
+description: 本文讨论linux系统中pci设备直通给qemu中涉及的pci热插拔问题。
+abbrlink: 9a1b7375
 date: 2021-06-28 23:56:18
-tags: [QEMU, PCIe, 虚拟化]
-description: "本文讨论linux系统中pci设备直通给qemu中涉及的pci热插拔问题。"
 categories:
 ---
 

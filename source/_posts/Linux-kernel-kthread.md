@@ -1,8 +1,10 @@
 ---
 title: Linux kernel kthread
+tags:
+  - Linux内核
+description: This doc shares the basic logic of kthread usage in Linux kernel.
+abbrlink: 71cebe4e
 date: 2021-06-28 23:55:34
-tags: [Linux内核]
-description: "This doc shares the basic logic of kthread usage in Linux kernel."
 categories:
 ---
 

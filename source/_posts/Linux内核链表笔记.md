@@ -1,8 +1,10 @@
 ---
 title: Linux内核链表笔记
+tags:
+  - Linux内核
+description: 本文介绍linux kernel中的链表实现，用法和其中包含的设计思想。
+abbrlink: f3ed511a
 date: 2021-07-17 11:02:02
-tags: [Linux内核]
-description: "本文介绍linux kernel中的链表实现，用法和其中包含的设计思想。"
 categories:
 ---
 

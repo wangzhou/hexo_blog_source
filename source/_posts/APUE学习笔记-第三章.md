@@ -1,9 +1,11 @@
 ---
 title: APUE学习笔记(第三章)
-date: 2021-07-17 10:48:01
-tags: [APUE]
-description: "本章讨论create, open, read, write，lseek等文件I/O函数。"
+tags:
+  - APUE
+description: '本章讨论create, open, read, write，lseek等文件I/O函数。'
 categories: read
+abbrlink: 4f2f584c
+date: 2021-07-17 10:48:01
 ---
 
 

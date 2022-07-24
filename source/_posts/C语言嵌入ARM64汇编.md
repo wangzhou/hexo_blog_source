@@ -1,12 +1,16 @@
 ---
 title: C语言嵌入ARM64汇编
+tags:
+  - ARM64
+  - 汇编
+description: >-
+  本文介绍在C语言嵌入汇编语言的方法，linux kernel里有很多这样的例子。这里在aarch64
+  平台下介绍，所有例子都是这个平台下的。网上的这篇文章已经有很好的介绍，大家可以 参阅：
+  http://www.ethernut.de/en/documents/arm-inline-asm.html,
+  http://ericw.ca/notes/a-tiny-guide-to-gcc-inline-assembly.html
+  https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html
+abbrlink: c8d7dd82
 date: 2021-07-05 22:34:15
-tags: [ARM64, 汇编]
-description: "本文介绍在C语言嵌入汇编语言的方法，linux kernel里有很多这样的例子。这里在aarch64
-平台下介绍，所有例子都是这个平台下的。网上的这篇文章已经有很好的介绍，大家可以
-参阅： http://www.ethernut.de/en/documents/arm-inline-asm.html,
-       http://ericw.ca/notes/a-tiny-guide-to-gcc-inline-assembly.html
-       https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html"
 categories:
 ---
 

@@ -1,8 +1,14 @@
 ---
 title: Linux kernel crypto scomp/acomp arch analysis
+tags:
+  - Linux内核
+  - crypto
+  - ZIP
+description: >-
+  This doc shares the arch of linux crypto scomp/acomp arch. This doc is based
+  on mainline kernel v5.0-rc3
+abbrlink: 6fa184
 date: 2021-06-28 23:57:46
-tags: [Linux内核, crypto, ZIP]
-description: "This doc shares the arch of linux crypto scomp/acomp arch. This doc is based on mainline kernel v5.0-rc3"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: 在qemu里增加指令的前端解码
+tags:
+  - 虚拟化
+  - QEMU
+description: 本文梳理在qemu里增加一个指令的前端解码的基本逻辑。
+abbrlink: 633165bf
 date: 2021-12-25 23:56:02
-tags: [虚拟化, QEMU]
-description: "本文梳理在qemu里增加一个指令的前端解码的基本逻辑。"
 categories:
 ---
 

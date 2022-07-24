@@ -1,8 +1,11 @@
 ---
 title: Build your own rootfs by buildroot
+tags:
+  - 软件调试
+  - rootfs
+description: 本文简单记录下编译rootfs的过程
+abbrlink: 962c911d
 date: 2021-06-20 23:16:36
-tags: [软件调试, rootfs]
-description: "本文简单记录下编译rootfs的过程"
 ---
 
 1. git clone git://git.buildroot.net/buildroot

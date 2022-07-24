@@ -1,8 +1,11 @@
 ---
 title: PCIe PRI分析
+tags:
+  - PCIe
+  - 计算机体系结构
+description: 本文分析和PCIe PRI特性相关的软硬件接口逻辑，以及相关的软件实现。
+abbrlink: 3cae7ed4
 date: 2021-08-21 09:59:07
-tags: [PCIe, 计算机体系结构]
-description: "本文分析和PCIe PRI特性相关的软硬件接口逻辑，以及相关的软件实现。"
 categories:
 ---
 

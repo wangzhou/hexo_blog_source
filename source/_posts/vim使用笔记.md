@@ -1,8 +1,10 @@
 ---
 title: vim使用笔记
+tags:
+  - 软件开发
+description: 本文档用来收集vim的各种使用技巧
+abbrlink: 69295bda
 date: 2021-07-17 11:07:32
-tags: [软件开发]
-description: "本文档用来收集vim的各种使用技巧"
 categories:
 ---
 

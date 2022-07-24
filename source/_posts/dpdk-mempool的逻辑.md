@@ -1,8 +1,10 @@
 ---
 title: dpdk mempool的逻辑
+tags:
+  - dpdk
+description: 本文分析dpdk里自带的块内存池的实现
+abbrlink: '57323647'
 date: 2021-06-20 23:15:26
-tags: [dpdk]
-description: "本文分析dpdk里自带的块内存池的实现"
 ---
 
 dpdk里有块内存池的支持，用户可以调用相关接口创建固定block大小的内存池，然后从这

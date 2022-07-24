@@ -1,8 +1,11 @@
 ---
 title: Linux kernel PCI is_physfn的逻辑
+tags:
+  - Linux内核
+  - PCIe
+description: 本文梳理Linux PCI驱动里is_physfn的逻辑
+abbrlink: 522cb356
 date: 2021-06-27 18:04:07
-tags: [Linux内核, PCIe]
-description: "本文梳理Linux PCI驱动里is_physfn的逻辑"
 ---
 
 Linux内核里struct pci_dev里有一个叫is_physfn的域段, 从名字上来看，这个域段可以

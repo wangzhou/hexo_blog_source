@@ -1,14 +1,17 @@
 ---
 title: Dump PCIe设备BAR寄存器
+tags:
+  - 软件调试
+  - PCIe
+description: >-
+  调试的时候需要dump PCIe设备BAR里各个寄存器的内容，一般我们可以读
+  /sys/devices/<device_path>/resource[n]这个文件得到。
+
+  Martoni写了一个小软件可以方便resource里内容的读取。这个软件在： https://github.com/Martoni/pcie_debug。
+
+  本文介绍这个工具的使用。
+abbrlink: 8674802a
 date: 2021-06-27 18:03:34
-tags: [软件调试, PCIe]
-description: "调试的时候需要dump PCIe设备BAR里各个寄存器的内容，一般我们可以读
-/sys/devices/<device_path>/resource[n]这个文件得到。
-
-Martoni写了一个小软件可以方便resource里内容的读取。这个软件在：
-https://github.com/Martoni/pcie_debug。
-
-本文介绍这个工具的使用。"
 ---
 
 下载后编译即可，可能需要安装readline和curses库。

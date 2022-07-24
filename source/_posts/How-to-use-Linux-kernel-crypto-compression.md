@@ -1,8 +1,11 @@
 ---
 title: How to use Linux kernel crypto compression
+tags:
+  - Linux内核
+  - crypto
+description: This doc shares the crypto compression API in Linux kernel.
+abbrlink: 2efef7d4
 date: 2021-06-28 23:58:56
-tags: [Linux内核, crypto]
-description: "This doc shares the crypto compression API in Linux kernel."
 categories:
 ---
 

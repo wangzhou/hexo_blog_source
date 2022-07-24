@@ -1,8 +1,11 @@
 ---
 title: PCI/SMMU ATS analysis note
+tags:
+  - 计算机体系结构
+  - PCIe
+description: This doc is an analysis note about ATS feature in PCIe/SMMU
+abbrlink: e89bca2c
 date: 2021-07-05 22:42:41
-tags: [计算机体系结构, PCIe]
-description: "This doc is an analysis note about ATS feature in PCIe/SMMU"
 categories:
 ---
 

@@ -1,8 +1,10 @@
 ---
 title: PCIe学习笔记(三)
+tags:
+  - PCIe
+description: '本文继续pci note 2, 介绍函数pci_scan_child_bus, 内核版本为3.18-rc1'
+abbrlink: 9dc5e4ca
 date: 2021-07-11 23:56:20
-tags: [PCIe]
-description: "本文继续pci note 2, 介绍函数pci_scan_child_bus, 内核版本为3.18-rc1"
 categories:
 ---
 

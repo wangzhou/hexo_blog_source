@@ -1,8 +1,10 @@
 ---
 title: Linux巨页的使用
+tags:
+  - Linux内核
+description: linux内核支持两种巨页的使用方法，一种是普通巨页，一种是透明巨页。本文介绍的是普通巨页的使用。
+abbrlink: f55c9d41
 date: 2021-06-20 23:15:06
-tags: [Linux内核]
-description: "linux内核支持两种巨页的使用方法，一种是普通巨页，一种是透明巨页。本文介绍的是普通巨页的使用。"
 ---
 
 普通巨页的内核说明文档在linux/Documentation/admin-guide/mm/hugetlbpage.rst

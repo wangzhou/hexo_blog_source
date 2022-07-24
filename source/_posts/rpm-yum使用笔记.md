@@ -1,8 +1,11 @@
 ---
 title: rpm yum使用笔记
+tags:
+  - 包管理
+  - RPM/YUM
+description: This document is used to collect and share rpm/yum related commands
+abbrlink: cf4b4360
 date: 2021-07-05 22:29:58
-tags: [包管理, RPM/YUM]
-description: "This document is used to collect and share rpm/yum related commands"
 categories:
 ---
 rpm

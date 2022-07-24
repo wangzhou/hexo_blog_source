@@ -1,9 +1,10 @@
 ---
 title: '程序configure, compile, install的逻辑'
+tags:
+  - 软件开发
+description: '本文讲述linux环境下用户态程序的配置,编译和安装的整个逻辑过程。具体的细节需要 在另外的文章中说明'
+abbrlink: d5d9f373
 date: 2021-07-17 11:03:09
-tags: [软件开发]
-description: "本文讲述linux环境下用户态程序的配置,编译和安装的整个逻辑过程。具体的细节需要
- 在另外的文章中说明"
 categories:
 ---
 

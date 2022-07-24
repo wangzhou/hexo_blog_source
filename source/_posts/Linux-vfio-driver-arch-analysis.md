@@ -1,8 +1,11 @@
 ---
 title: Linux vfio driver arch analysis
+tags:
+  - 虚拟化
+  - vfio
+description: 本文分析Linux内核里vfio驱动的架构
+abbrlink: a1d7a5a7
 date: 2021-07-11 23:40:18
-tags: [虚拟化, vfio]
-description: "本文分析Linux内核里vfio驱动的架构"
 categories:
 ---
 

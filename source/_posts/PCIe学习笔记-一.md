@@ -1,11 +1,13 @@
 ---
 title: PCIe学习笔记(一)
+tags:
+  - PCIe
+description: >-
+  本文是学习linux kernel中PCI子系统代码的一个笔记。PCI子系统的代码最主要的就是
+  实现整个PCI树的枚举和资源的分配。本文先总体介绍，然后主要分析pci_create_root_bus
+  函数，该函数实现pci_bus结构和pci_host_bridge结构的分配。本文分析的代码版本为内核 3.18-rc1
+abbrlink: 4c075f83
 date: 2021-07-11 23:48:09
-tags: [PCIe]
-description: "本文是学习linux kernel中PCI子系统代码的一个笔记。PCI子系统的代码最主要的就是
- 实现整个PCI树的枚举和资源的分配。本文先总体介绍，然后主要分析pci_create_root_bus
- 函数，该函数实现pci_bus结构和pci_host_bridge结构的分配。本文分析的代码版本为内核
- 3.18-rc1"
 categories:
 ---
 

@@ -1,9 +1,13 @@
 ---
 title: ftrace学习笔记1
+tags:
+  - 软件调试
+  - ftrace
+description: >-
+  根据之前的学习笔记整理, 介绍ftrace的一些基本知识，以及几个基础的tracer。不过读者
+  要是有时间，建议可以浏览下kernel源码中有关ftrace的使用介绍：linux-src/Documentation/trace/
+abbrlink: 57c95d77
 date: 2021-07-17 11:16:48
-tags: [软件调试, ftrace]
-description: "根据之前的学习笔记整理, 介绍ftrace的一些基本知识，以及几个基础的tracer。不过读者
-要是有时间，建议可以浏览下kernel源码中有关ftrace的使用介绍：linux-src/Documentation/trace/"
 categories:
 ---
 

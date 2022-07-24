@@ -1,8 +1,10 @@
 ---
 title: Linux内存相关的测试工具
+tags:
+  - 内存管理
+description: 本文用来整理Linux内存相关的测试工具
+abbrlink: 43af8eb9
 date: 2021-06-19 10:11:01
-tags: [内存管理]
-description: "本文用来整理Linux内存相关的测试工具"
 ---
 
 1. smem

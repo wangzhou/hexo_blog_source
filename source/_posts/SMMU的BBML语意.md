@@ -1,8 +1,10 @@
 ---
 title: SMMU的BBML语意
+tags:
+  - SMMU
+description: 本文整理SMMU和ARM里BBML相关的逻辑。
+abbrlink: 93cf9052
 date: 2021-06-27 23:44:38
-tags: [SMMU]
-description: "本文整理SMMU和ARM里BBML相关的逻辑。"
 ---
 
 SMMUv3 spec 3.21里定义了BBML的基本逻辑。软件在修改页表的时候，硬件可能还在访问，

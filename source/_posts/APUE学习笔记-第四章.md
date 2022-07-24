@@ -1,9 +1,11 @@
 ---
 title: APUE学习笔记(第四章)
-date: 2021-07-17 10:44:21
-tags: [APUE]
-description: "APUE第四章学习笔记"
+tags:
+  - APUE
+description: APUE第四章学习笔记
 categories: read
+abbrlink: '7240e082'
+date: 2021-07-17 10:44:21
 ---
 
 这一章将文件系统的相关操作，比如文件，目录，软硬链接等等。要深入的了解这些需要

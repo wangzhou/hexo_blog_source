@@ -1,8 +1,10 @@
 ---
 title: Linux内核模块编译
+tags:
+  - Linux内核
+description: 介绍linux内核模块的编译步骤
+abbrlink: be0ad29e
 date: 2021-07-17 11:21:03
-tags: [Linux内核]
-description: "介绍linux内核模块的编译步骤"
 categories:
 ---
  

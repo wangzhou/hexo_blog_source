@@ -1,8 +1,11 @@
 ---
 title: docker笔记
+tags:
+  - 虚拟化
+  - 容器
+description: docker的三个最基本的概念是镜像(Image)，容器(Container)和仓库(Repository)。本文简单介绍有关他们的基础操作。
+abbrlink: 4417b09c
 date: 2021-07-11 23:33:02
-tags: [虚拟化, 容器]
-description: "docker的三个最基本的概念是镜像(Image)，容器(Container)和仓库(Repository)。本文简单介绍有关他们的基础操作。"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: PCIe INTx parse in ACPI
+tags:
+  - PCIe
+  - ACPI
+description: 本文分析Linux系统里PCIe INTx中断的ACPI解析过程
+abbrlink: fbb77401
 date: 2021-07-11 23:17:22
-tags: [PCIe, ACPI]
-description: "本文分析Linux系统里PCIe INTx中断的ACPI解析过程"
 categories:
 ---
 

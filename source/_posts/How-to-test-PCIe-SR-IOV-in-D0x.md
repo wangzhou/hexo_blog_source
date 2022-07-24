@@ -1,9 +1,13 @@
 ---
 title: How to test PCIe SR-IOV in D0x
+tags:
+  - 软件测试
+  - PCIe
+description: >-
+  This doc helps to introduce how to test PCIe SR-IOV in HiSilicon D05 board. We
+  can use same way to test SR-IOV in Hi1620.
+abbrlink: 9fd37943
 date: 2021-07-11 23:34:19
-tags: [软件测试, PCIe]
-description: "This doc helps to introduce how to test PCIe SR-IOV in HiSilicon D05 board.
-We can use same way to test SR-IOV in Hi1620."
 categories:
 ---
 

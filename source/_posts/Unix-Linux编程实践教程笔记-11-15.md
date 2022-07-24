@@ -1,11 +1,14 @@
 ---
 title: Unix/Linux编程实践教程笔记(11-15)
+tags:
+  - Linux用户态编程
+description: >-
+  本文档是Unix/Linux编程实践教程最后五章的总结笔记，这五章主要围绕socket，讲了各种 进程、线程间通信的方法。大家可以从这个链接git
+  clone该书对应的代码:
+  https://github.com/yuzhidi/Understanding-UNIXLINUX-Programming.git 简单编译后就
+  可以运行。
+abbrlink: db3a18be
 date: 2021-06-27 18:00:40
-tags: [Linux用户态编程]
-description: "本文档是Unix/Linux编程实践教程最后五章的总结笔记，这五章主要围绕socket，讲了各种
-进程、线程间通信的方法。大家可以从这个链接git clone该书对应的代码:
-https://github.com/yuzhidi/Understanding-UNIXLINUX-Programming.git 简单编译后就
-可以运行。"
 ---
 
 从获取服务的服务的角度讲，一个进程可以直接调用函数，也可以通过和另个一个进程互动

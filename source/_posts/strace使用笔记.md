@@ -1,9 +1,10 @@
 ---
 title: strace使用笔记
+tags:
+  - 软件调试
+description: stracestrace a.out 可以输出a.out中依次调用的系统调用，和gdb一样strace使 用系统调用pstrace实现其功能。
+abbrlink: e222383f
 date: 2021-07-17 11:23:29
-tags: [软件调试]
-description: "stracestrace a.out 可以输出a.out中依次调用的系统调用，和gdb一样strace使
-用系统调用pstrace实现其功能。"
 categories:
 ---
 

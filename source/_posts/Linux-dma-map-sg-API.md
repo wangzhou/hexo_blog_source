@@ -1,8 +1,12 @@
 ---
 title: Linux dma_map_sg API
+tags:
+  - Linux内核
+  - DMA
+  - iommu
+description: 本文简介Linux内核DMA接口 dma_map_sg的语意
+abbrlink: 463e729a
 date: 2021-06-27 18:05:15
-tags: [Linux内核, DMA, iommu]
-description: "本文简介Linux内核DMA接口 dma_map_sg的语意"
 ---
 
 如linux/Documentation/DMA-API-HOW.txt里提到的:

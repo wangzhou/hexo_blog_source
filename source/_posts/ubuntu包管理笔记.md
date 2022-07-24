@@ -1,9 +1,11 @@
 ---
 title: ubuntu包管理笔记
+tags:
+  - apt/dpkg
+  - 包管理
+description: apt、dpkg是使用ubuntu系统常用的软件包管理的工具。他们可以完成软件的自动 下载和安装。本文介绍他们的一些用法
+abbrlink: b3d13d74
 date: 2021-07-17 11:08:39
-tags: [apt/dpkg, 包管理]
-description: "apt、dpkg是使用ubuntu系统常用的软件包管理的工具。他们可以完成软件的自动
-下载和安装。本文介绍他们的一些用法"
 categories:
 ---
 

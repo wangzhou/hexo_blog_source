@@ -1,10 +1,14 @@
 ---
 title: ubuntu使用LDAP做用户管理
+tags:
+  - 运维
+  - LDAP
+description: >-
+  LDAP is one way to implement centralized authentication in linux system. This
+  note talks about how to make related configurations to implement centralized
+  authentication in ubuntu 14.04.
+abbrlink: 671c9ad8
 date: 2021-07-11 23:50:39
-tags: [运维, LDAP]
-description: "LDAP is one way to implement centralized authentication in linux system. This
-note talks about how to make related configurations to implement centralized
-authentication in ubuntu 14.04."
 categories:
 ---
 

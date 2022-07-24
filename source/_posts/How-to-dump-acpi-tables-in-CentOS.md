@@ -1,8 +1,11 @@
 ---
 title: How to dump acpi tables in CentOS
+tags:
+  - UEFI
+  - ACPI
+description: This document shows how to dump ACPI table in a Linux system
+abbrlink: e8dc22fe
 date: 2021-07-05 22:29:37
-tags: [UEFI, ACPI]
-description: "This document shows how to dump ACPI table in a Linux system"
 categories:
 ---
 

@@ -1,8 +1,10 @@
 ---
 title: Linux/UEFI memory block note
+tags:
+  - 计算机体系结构
+description: This doc shows how UEFI reports memory blocks to OS
+abbrlink: 6572c16f
 date: 2021-07-05 22:29:05
-tags: [计算机体系结构]
-description: "This doc shows how UEFI reports memory blocks to OS"
 categories:
 ---
 

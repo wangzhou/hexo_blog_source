@@ -1,13 +1,17 @@
 ---
 title: LDD3 study note 1
-date: 2021-07-05 22:39:55
-tags: [读书笔记, LDD3]
-description: "LDD3的第三章介绍了一个简单的字符设备，实现了read/write/open/release等回调函数。
-网上有LDD3自带的源代码，为了方便查找，我把官方源代码放到了: https://github.com/wangzhou/ldd3.git
+tags:
+  - 读书笔记
+  - LDD3
+description: >-
+  LDD3的第三章介绍了一个简单的字符设备，实现了read/write/open/release等回调函数。
+  网上有LDD3自带的源代码，为了方便查找，我把官方源代码放到了: https://github.com/wangzhou/ldd3.git
 
-自己实现的代码(第三章的简易字符设备)放在了：https://github.com/wangzhou/scull.git
-本文只是记录一下实现中遇到的需要注意的地方，适合驱动入门的读者。"
+  自己实现的代码(第三章的简易字符设备)放在了：https://github.com/wangzhou/scull.git
+  本文只是记录一下实现中遇到的需要注意的地方，适合驱动入门的读者。
 categories: read
+abbrlink: e855b9e9
+date: 2021-07-05 22:39:55
 ---
 
 1. 这是一个什么设备

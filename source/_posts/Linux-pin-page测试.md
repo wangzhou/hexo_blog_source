@@ -1,8 +1,10 @@
 ---
 title: Linux pin page测试
+tags:
+  - Linux内核
+description: '本文是对于Linux pin物理页面行为的一个测试, 通过测试确定相关的物理页面确实没有发生移动'
+abbrlink: a0f66ae6
 date: 2021-06-20 23:14:47
-tags: [Linux内核]
-description: "本文是对于Linux pin物理页面行为的一个测试, 通过测试确定相关的物理页面确实没有发生移动"
 ---
 
 我们写一个pin page的代码观察pin page系统的具体行为。这个测试代码分为两部分，一部分

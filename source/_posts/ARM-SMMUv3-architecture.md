@@ -1,8 +1,12 @@
 ---
 title: ARM SMMUv3 architecture
+tags:
+  - Linux内核
+  - SMMU
+  - 计算机体系结构
+description: 本文梳理IOMMU相关的整体软硬件设计的全貌。具体的硬件以ARM SMMUv3作为例子。
+abbrlink: e1dd65ca
 date: 2021-06-21 13:06:42
-tags: [Linux内核, SMMU, 计算机体系结构]
-description: "本文梳理IOMMU相关的整体软硬件设计的全貌。具体的硬件以ARM SMMUv3作为例子。"
 ---
 
 IOMMU是外设的MMU。原来的外设主动发起的DMA的操作使用的都是系统的物理地址，直接

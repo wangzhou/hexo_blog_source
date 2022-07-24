@@ -1,8 +1,11 @@
 ---
 title: Linux内核DMA子系统分析
+tags:
+  - Linux内核
+  - DMA
+description: 本文分析Linux内核DMA子系统的构架，需要写DMA engine驱动的同学可以作为参考。
+abbrlink: 5e6259ac
 date: 2021-08-21 09:39:04
-tags: [Linux内核, DMA]
-description: "本文分析Linux内核DMA子系统的构架，需要写DMA engine驱动的同学可以作为参考。"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: 用mprotect定位踩内存问题
+tags:
+  - 软件调试
+  - mprotect
+description: 本文以一个实际的例子介绍如何使用mprotect定位踩内存的问题
+abbrlink: 3bbd52f3
 date: 2021-06-27 18:13:40
-tags: [软件调试, mprotect]
-description: "本文以一个实际的例子介绍如何使用mprotect定位踩内存的问题"
 ---
 
 Linux用户态程序踩内存时可以用mprotect定位，mprotect本身是linux系统上的一个系统

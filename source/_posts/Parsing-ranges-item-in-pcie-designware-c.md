@@ -1,9 +1,12 @@
 ---
 title: Parsing ranges item in pcie-designware.c
+tags:
+  - PCIe
+description: >-
+  This document tries to analysis codes about parsing ranges item in PCIe dts
+  node. kernel version: v4.0.
+abbrlink: da21670b
 date: 2021-07-11 23:45:47
-tags: [PCIe]
-description: "This document tries to analysis codes about parsing ranges item in PCIe dts
-node. kernel version: v4.0."
 categories:
 ---
 

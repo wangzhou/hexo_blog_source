@@ -1,8 +1,11 @@
 ---
 title: ftp服务器设置
+tags:
+  - 运维
+  - shell
+description: 本文记录一次ftp服务器的搭建过程，同时提供一种Linux上查找资料的方法
+abbrlink: 738a10a8
 date: 2021-07-17 11:17:36
-tags: [运维, shell]
-description: "本文记录一次ftp服务器的搭建过程，同时提供一种Linux上查找资料的方法"
 categories:
 ---
 

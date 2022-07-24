@@ -1,8 +1,11 @@
 ---
 title: 如何尝试使用Linux SVA
+tags:
+  - Linux内核
+  - SMMU
+description: 本文介绍使用Linux SVA技术的方法，基于KunPeng920上的压缩解压缩设备。
+abbrlink: 5cae2bae
 date: 2021-06-21 13:05:38
-tags: [Linux内核, SMMU]
-description: "本文介绍使用Linux SVA技术的方法，基于KunPeng920上的压缩解压缩设备。"
 ---
 
 1. 硬件确认

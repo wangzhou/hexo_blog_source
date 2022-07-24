@@ -1,9 +1,12 @@
 ---
 title: git使用笔记
-date: 2021-07-17 11:00:34
-tags: [软件开发, git]
-description: "这篇文档的开始是got git这本书的读书笔记。后面开始是一些git使用技巧的总结。"
+tags:
+  - 软件开发
+  - git
+description: 这篇文档的开始是got git这本书的读书笔记。后面开始是一些git使用技巧的总结。
 categories: read
+abbrlink: a722b34f
+date: 2021-07-17 11:00:34
 ---
 
 chaper 2

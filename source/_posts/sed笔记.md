@@ -1,8 +1,10 @@
 ---
 title: sed笔记
+tags:
+  - shell
+description: 本文是Linux sed命令的一个学习笔记
+abbrlink: 1875a13a
 date: 2021-07-11 23:33:46
-tags: [shell]
-description: "本文是Linux sed命令的一个学习笔记"
 categories:
 ---
 

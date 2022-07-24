@@ -1,11 +1,13 @@
 ---
 title: Makefile再学习
-date: 2021-09-17 22:54:43
-tags: [Makefile]
-description: "本文是《跟我一起学Makefile》的一个学习笔记，N年前看过这个材料，现在再回头
-      看下，温故而知新。然后在那pciutils里手写的Makefile逐行对照着看下。本文也用于
-      后面持续收集make相关的用法。"
+tags:
+  - Makefile
+description: >-
+  本文是《跟我一起学Makefile》的一个学习笔记，N年前看过这个材料，现在再回头
+  看下，温故而知新。然后在那pciutils里手写的Makefile逐行对照着看下。本文也用于 后面持续收集make相关的用法。
 categories: read
+abbrlink: 14572ba4
+date: 2021-09-17 22:54:43
 ---
 
 make和Makefile的基本逻辑

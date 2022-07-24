@@ -1,8 +1,12 @@
 ---
 title: uthash和glib hash
+tags:
+  - Linux用户态编程
+  - hash
+  - glib
+description: 本文是一个uthash和glib hash的学习笔记。
+abbrlink: 5641798c
 date: 2021-07-23 22:17:43
-tags: [Linux用户态编程, hash, glib]
-description: "本文是一个uthash和glib hash的学习笔记。"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: Linux PCIe hotplug arch analysis
+tags:
+  - PCIe
+  - Linux内核
+description: 本文分析Linux内核里PCIe热插拔的代码架构
+abbrlink: 487ff967
 date: 2021-07-11 23:37:56
-tags: [PCIe, Linux内核]
-description: "本文分析Linux内核里PCIe热插拔的代码架构"
 categories:
 ---
 

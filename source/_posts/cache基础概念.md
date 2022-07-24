@@ -1,11 +1,16 @@
 ---
 title: cache基础概念
+tags:
+  - cache
+  - 计算机体系结构
+  - ARMv8
+description: >-
+  本文是学习cache基础知识过程中的一个笔记。学习的材料是《深入理解计算机系统》和
+  ARMv8的编程指导手册。这个笔记会梳理cache相关的几个基础概念，比如，cache line， cache set，
+  way，全相连cache，组相连cache，直接映射cache等等。其实
+  《深入理解计算机系统》这本书里讲的已经很清楚。这里会结合ARMv8手册做一个简单梳理。
+abbrlink: 3d5cb697
 date: 2021-06-28 23:59:44
-tags: [cache, 计算机体系结构, ARMv8]
-description: "本文是学习cache基础知识过程中的一个笔记。学习的材料是《深入理解计算机系统》和
-ARMv8的编程指导手册。这个笔记会梳理cache相关的几个基础概念，比如，cache line，
-cache set， way，全相连cache，组相连cache，直接映射cache等等。其实
-《深入理解计算机系统》这本书里讲的已经很清楚。这里会结合ARMv8手册做一个简单梳理。"
 categories:
 ---
 

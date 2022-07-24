@@ -1,8 +1,12 @@
 ---
 title: Guest and host communication for QEMU
+tags:
+  - QEMU
+description: >-
+  When we use qemu to help debug, we need a way to move files between host and
+  guest. This doc shares a easy way to do this.
+abbrlink: ec556da6
 date: 2021-06-28 23:58:20
-tags: [QEMU]
-description: "When we use qemu to help debug, we need a way to move files between host and guest. This doc shares a easy way to do this."
 categories:
 ---
 

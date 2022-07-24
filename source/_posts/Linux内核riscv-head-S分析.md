@@ -1,11 +1,15 @@
 ---
 title: Linux内核riscv head.S分析
+tags:
+  - riscv
+  - Linux内核
+  - 计算机体系结构
+description: >-
+  head.S是Linux内核最初阶段对机器初始化的代码，和体系构架相关，其中定义 了三个符号：_start, _start_kernel,
+  reset_regs。主要问题集中在：1. 内存初始化? 2. 怎么起多核？
+  目前只看了单核启动相关的东西，而且所有不常用的内核配置先跳过不看。笔记在注释里，以n:开始。 分析基于Linux 5.17-rc3
+abbrlink: a649395e
 date: 2022-05-16 19:24:25
-tags: [riscv, Linux内核，计算机体系结构]
-description: "head.S是Linux内核最初阶段对机器初始化的代码，和体系构架相关，其中定义
-了三个符号：_start, _start_kernel, reset_regs。主要问题集中在：1. 内存初始化? 2. 怎么起多核？
-目前只看了单核启动相关的东西，而且所有不常用的内核配置先跳过不看。笔记在注释里，以n:开始。
-分析基于Linux 5.17-rc3"
 categories:
 ---
 

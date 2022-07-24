@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "hexo": "^5.0.0",
+    "hexo-abbrlink": "^2.2.1",
     "hexo-asset-image": "git+https://github.com/7ym0n/hexo-asset-image.git",
     "hexo-generator-archive": "^1.0.0",
     "hexo-generator-category": "^1.0.0",

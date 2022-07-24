@@ -1,10 +1,13 @@
 ---
 title: 使用qemu虚拟机学习Linux内核
+tags:
+  - QEMU
+  - 软件开发
+description: >-
+  对于linux kernel的初学者来说，搭建一套内核可以运行的环境是非常重要的。看书的同时
+  自己动手编译下内核，加点打印看看程序的执行过程是很有帮助的。本文介绍一个这样的简易 环境用于linux kernel的学习。
+abbrlink: c5c4ef41
 date: 2021-07-17 10:56:21
-tags: [QEMU, 软件开发]
-description: "对于linux kernel的初学者来说，搭建一套内核可以运行的环境是非常重要的。看书的同时
-自己动手编译下内核，加点打印看看程序的执行过程是很有帮助的。本文介绍一个这样的简易
-环境用于linux kernel的学习。"
 categories:
 ---
 

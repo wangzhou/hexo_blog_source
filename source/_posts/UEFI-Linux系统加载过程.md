@@ -1,8 +1,10 @@
 ---
 title: UEFI/Linux系统加载过程
+tags:
+  - UEFI
+description: 本文梳理一个UEFI加载linux启动的流程
+abbrlink: c186a0ca
 date: 2021-07-11 23:16:59
-tags: [UEFI]
-description: "本文梳理一个UEFI加载linux启动的流程"
 categories:
 ---
 

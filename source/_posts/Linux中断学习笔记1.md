@@ -1,8 +1,10 @@
 ---
 title: Linux中断学习笔记1
+tags:
+  - Linux内核
+description: N年前学习Linux中断的一个笔记，当时要支持GPIO做为中断使用
+abbrlink: aaceb51e
 date: 2021-07-17 11:12:26
-tags: [Linux内核]
-description: "N年前学习Linux中断的一个笔记，当时要支持GPIO做为中断使用"
 categories:
 ---
 

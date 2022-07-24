@@ -1,8 +1,10 @@
 ---
 title: PCIe学习笔记(四)
+tags:
+  - PCIe
+description: '本文继续pci note 3, 介绍PCI枚举中资源分配相关的函数, 内核版本为3.18-rc1'
+abbrlink: 67860bc5
 date: 2021-07-11 23:49:52
-tags: [PCIe]
-description: "本文继续pci note 3, 介绍PCI枚举中资源分配相关的函数, 内核版本为3.18-rc1"
 categories:
 ---
 

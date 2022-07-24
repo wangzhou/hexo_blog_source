@@ -1,10 +1,15 @@
 ---
 title: how to test crypto accelerator engine
+tags:
+  - Linux内核
+  - crypto
+  - 软件测试
+description: >-
+  Linux内核crypto子系统带有自测试的功能，它可以对注册到crypto子系统上的各种算法
+  做测试。如果你自己写了一个驱动注册了一个算法到crypto子系统上可以使用crypto自带
+  的测试程序做一下快速的测试。本文大概介绍下crypto下的自测试相关的东西。
+abbrlink: 65923ba6
 date: 2021-07-05 22:26:58
-tags: [Linux内核, crypto, 软件测试]
-description: "Linux内核crypto子系统带有自测试的功能，它可以对注册到crypto子系统上的各种算法
-做测试。如果你自己写了一个驱动注册了一个算法到crypto子系统上可以使用crypto自带
-的测试程序做一下快速的测试。本文大概介绍下crypto下的自测试相关的东西。"
 categories:
 ---
 

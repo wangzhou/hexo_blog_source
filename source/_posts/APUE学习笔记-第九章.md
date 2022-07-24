@@ -1,9 +1,12 @@
 ---
 title: APUE学习笔记(第九章)
-date: 2021-07-11 23:42:41
-tags: [APUE, Linux用户态编程]
-description: "This is a note about APUE charpter 9"
+tags:
+  - APUE
+  - Linux用户态编程
+description: This is a note about APUE charpter 9
 categories: read
+abbrlink: 1113baab
+date: 2021-07-11 23:42:41
 ---
 
 最早的终端是电传打字机输入，纸带输出, 后来发展为键盘输入，显示器输出。终端在

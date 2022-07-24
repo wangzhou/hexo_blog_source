@@ -1,17 +1,20 @@
 ---
 title: PCIe enumeration for SR-IOV PCIe device
+tags:
+  - Linux内核
+  - PCIe
+description: >-
+  There are a lot things should be done in software to support PCIe SR-IOV.
+  Using qemu(for example) to use a VF, at least, we should:
+
+  1. host PCI subsystem finds VF and allocate resources for VF. 2. vfio driver
+  exports VF's configure space, MEM/IO range to user space. 3. vfio driver
+  allocate DMA for VF by IOMMU. 4. vfio driver builds the interrupt flow for VF.
+  5. qemu vfio driver simulates PCIe device for guest kernel.
+
+  This document just tries to share an outline about point 1.
+abbrlink: 43f2d057
 date: 2021-07-11 23:35:34
-tags: [Linux内核, PCIe]
-description: "There are a lot things should be done in software to support PCIe SR-IOV.
-Using qemu(for example) to use a VF, at least, we should:
-
-1. host PCI subsystem finds VF and allocate resources for VF.
-2. vfio driver exports VF's configure space, MEM/IO range to user space.
-3. vfio driver allocate DMA for VF by IOMMU.
-4. vfio driver builds the interrupt flow for VF.
-5. qemu vfio driver simulates PCIe device for guest kernel.
-
-This document just tries to share an outline about point 1."
 categories:
 ---
 

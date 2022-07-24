@@ -1,8 +1,11 @@
 ---
 title: gdb用法收集
+tags:
+  - 软件调试
+  - gdb
+description: 一直没有系统的看看gdb的使用方法，用这个文档持续记录下gdb的使用技巧。
+abbrlink: 5a0482f1
 date: 2022-01-26 23:24:34
-tags: [软件调试, gdb]
-description: "一直没有系统的看看gdb的使用方法，用这个文档持续记录下gdb的使用技巧。"
 categories:
 ---
 

@@ -1,8 +1,10 @@
 ---
 title: 搭建邮件客户端进行Linux kernel开发
+tags:
+  - 软件开发
+description: 本文介绍用纯命令行处理邮件的环境搭建方法
+abbrlink: 6819ae4f
 date: 2021-07-11 23:45:12
-tags: [软件开发]
-description: "本文介绍用纯命令行处理邮件的环境搭建方法"
 categories:
 ---
 

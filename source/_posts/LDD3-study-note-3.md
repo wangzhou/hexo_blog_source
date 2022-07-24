@@ -1,10 +1,12 @@
 ---
 title: LDD3 study note 3
-date: 2021-07-05 22:40:00
-tags: [读书笔记, LDD3]
-description: "这篇笔记记录驱动程序中mmap的写法，以及相关的调试过程。同样代码在：
-https://github.com/wangzhou/scull.git"
+tags:
+  - 读书笔记
+  - LDD3
+description: '这篇笔记记录驱动程序中mmap的写法，以及相关的调试过程。同样代码在： https://github.com/wangzhou/scull.git'
 categories: read
+abbrlink: 65bd8c5
+date: 2021-07-05 22:40:00
 ---
 
 1. mmap

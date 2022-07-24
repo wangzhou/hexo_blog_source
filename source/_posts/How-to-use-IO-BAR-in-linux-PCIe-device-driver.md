@@ -1,10 +1,14 @@
 ---
 title: How to use IO BAR in linux PCIe device driver
+tags:
+  - 计算机体系结构
+  - PCIe
+description: >-
+  This document shows how to use an IO BAR in PCIe device. Currently there is
+  few devices supported IO BAR, however, when we have a card which needs to use
+  IO BAR, this document shares a basic logic about it
+abbrlink: ba71ce37
 date: 2021-07-05 22:43:23
-tags: [计算机体系结构, PCIe]
-description: "This document shows how to use an IO BAR in PCIe device. Currently
- there is few devices supported IO BAR, however, when we have a card which needs
- to use IO BAR, this document shares a basic logic about it"
 categories:
 ---
 

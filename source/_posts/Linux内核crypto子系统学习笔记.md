@@ -1,9 +1,13 @@
 ---
 title: Linux内核crypto子系统学习笔记
+tags:
+  - Linux内核
+  - crypto
+description: >-
+  本文分析Linux kernel里crypto子系统的大概实现，写crypto子系统下的加速器驱动的时候
+  可以参考下。crypto子系统支持加解密，压缩解压缩等功能。
+abbrlink: d2df7e14
 date: 2021-07-05 22:33:10
-tags: [Linux内核, crypto]
-description: "本文分析Linux kernel里crypto子系统的大概实现，写crypto子系统下的加速器驱动的时候
-可以参考下。crypto子系统支持加解密，压缩解压缩等功能。"
 categories:
 ---
 

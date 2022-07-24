@@ -1,10 +1,13 @@
 ---
 title: SMMU stalled transaction with device
+tags:
+  - SMMU
+description: >-
+  This doc shares the logic of SMMU translation terminate with device. We will
+  talk hardware operations and software code. This doc is based on code:
+  https://github.com/Linaro/linux-kernel-warpdrive branch: zip-devel
+abbrlink: 4e21b5c9
 date: 2021-06-27 17:57:29
-tags: [SMMU]
-description: "This doc shares the logic of SMMU translation terminate with device. We will
-talk hardware operations and software code. This doc is based on code:
-https://github.com/Linaro/linux-kernel-warpdrive branch: zip-devel"
 ---
 
 Currently when process dies, there is no way(software callback function) to

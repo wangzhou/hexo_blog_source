@@ -1,8 +1,12 @@
 ---
 title: vSVA逻辑分析
+tags:
+  - Linux内核
+  - QEMU
+  - 虚拟化
+description: 本文分析Linux vSVA现在的构架逻辑，用于相关开发人员对齐认识。目前为止Linux vSVA的代码还在构架讨论和代码review阶段。
+abbrlink: '22133167'
 date: 2021-06-21 13:07:11
-tags: [Linux内核, QEMU, 虚拟化]
-description: "本文分析Linux vSVA现在的构架逻辑，用于相关开发人员对齐认识。目前为止Linux vSVA的代码还在构架讨论和代码review阶段。"
 ---
 
 0. qemu基础认识

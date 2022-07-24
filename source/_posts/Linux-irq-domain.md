@@ -1,8 +1,10 @@
 ---
 title: Linux irq domain
+tags:
+  - Linux内核
+description: 本文介绍linux内核irq domain的基本概念，分析相关程序实现
+abbrlink: 5f6782db
 date: 2021-07-17 11:01:12
-tags: [Linux内核]
-description: "本文介绍linux内核irq domain的基本概念，分析相关程序实现"
 categories:
 ---
 

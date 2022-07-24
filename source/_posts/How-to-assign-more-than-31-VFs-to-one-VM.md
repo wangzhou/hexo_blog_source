@@ -1,9 +1,11 @@
 ---
 title: How to assign more than 31 VFs to one VM
+tags:
+  - QEMU
+  - PCIe
+description: 本文介绍通过给虚拟机加入PCIe switch扩展总线的方法，通过这样的方法， 可以实现把多个VF挂接给一个虚拟机
+abbrlink: 5d08c89f
 date: 2021-07-11 23:31:24
-tags: [QEMU, PCIe]
-description: "本文介绍通过给虚拟机加入PCIe switch扩展总线的方法，通过这样的方法，
-可以实现把多个VF挂接给一个虚拟机"
 categories:
 ---
 

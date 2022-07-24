@@ -1,8 +1,10 @@
 ---
 title: python学习笔记
+tags:
+  - python
+description: 汇集了下N年前的python学习笔记，以后用这个文档继续记录
+abbrlink: 743c31e9
 date: 2021-07-17 10:32:51
-tags: [python]
-description: "汇集了下N年前的python学习笔记，以后用这个文档继续记录"
 categories:
 ---
 

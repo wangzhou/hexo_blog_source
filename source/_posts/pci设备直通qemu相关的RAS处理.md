@@ -1,8 +1,12 @@
 ---
 title: pci设备直通qemu相关的RAS处理
+tags:
+  - PCIe
+  - QEMU
+  - RAS
+description: 本文介绍linux系统上当一个pf设备有pci aer错误的时候，对应的直通到qemu里的vf的行为。分析基于当前的主线内核v5.0-rc6。
+abbrlink: d34d1e70
 date: 2021-06-28 23:57:03
-tags: [PCIe, QEMU, RAS]
-description: "本文介绍linux系统上当一个pf设备有pci aer错误的时候，对应的直通到qemu里的vf的行为。分析基于当前的主线内核v5.0-rc6。"
 categories:
 ---
 

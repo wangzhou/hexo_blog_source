@@ -1,8 +1,11 @@
 ---
 title: Macbook虚拟机磁盘扩容
+tags:
+  - 虚拟化
+  - LVM
+description: 本文记录MacBook使用中给虚拟机磁盘扩容的过程。
+abbrlink: 2c0af50
 date: 2021-11-03 23:59:04
-tags: [虚拟化, LVM]
-description: "本文记录MacBook使用中给虚拟机磁盘扩容的过程。"
 categories:
 ---
 

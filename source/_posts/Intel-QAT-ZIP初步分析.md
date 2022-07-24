@@ -1,8 +1,11 @@
 ---
 title: Intel QAT ZIP初步分析
+tags:
+  - ZIP
+  - QAT
+description: 本文分析Intel QAT技术对应软件栈的支持，主要的关注点在压缩解压缩的软件栈，本文只是寻找资料时候的一个笔记，还很粗糙。
+abbrlink: 24427f5f
 date: 2021-06-27 18:04:39
-tags: [ZIP, QAT]
-description: "本文分析Intel QAT技术对应软件栈的支持，主要的关注点在压缩解压缩的软件栈，本文只是寻找资料时候的一个笔记，还很粗糙。"
 ---
 
 1. 基本信息 

@@ -1,8 +1,13 @@
 ---
 title: hisi perf uncore event
+tags:
+  - 软件性能
+  - perf
+description: >-
+  本文档介绍使用hisi perf uncore事件调优的方法，目前主要是perf
+  uncore事件和硬件的对应关系介绍。本文基于v5.6-rc1的主线内核进行分析。
+abbrlink: 86d5a04c
 date: 2021-06-19 10:32:07
-tags: [软件性能, perf]
-description: "本文档介绍使用hisi perf uncore事件调优的方法，目前主要是perf uncore事件和硬件的对应关系介绍。本文基于v5.6-rc1的主线内核进行分析。"
 ---
 
 你可以使用 perf list来列出系统支持的perf事件，有一类perf事件可以用来统计CPU的

@@ -1,11 +1,14 @@
 ---
 title: Linux设备驱动中DMA接口的使用
+tags:
+  - Linux内核
+description: >-
+  本文试图讲清楚linux里的DMA接口使用时的一些基本概念。阅读本文的时候，
+  可以先看看内核里的Documentation/DMA*(DMA相关的一些文件), 其实这里面讲的已经很清楚了，
+  另外还可以看看知乎上的一篇文章：https://zhuanlan.zhihu.com/p/25999484, 这篇文章对
+  Linux里关于地址空间的各个概念有很好的讲解。
+abbrlink: 1ac79c7b
 date: 2021-05-22 12:13:51
-tags: [Linux内核]
-description: "本文试图讲清楚linux里的DMA接口使用时的一些基本概念。阅读本文的时候，
-可以先看看内核里的Documentation/DMA*(DMA相关的一些文件), 其实这里面讲的已经很清楚了，
-另外还可以看看知乎上的一篇文章：https://zhuanlan.zhihu.com/p/25999484, 这篇文章对
-Linux里关于地址空间的各个概念有很好的讲解。"
 ---
 Linux设备驱动中DMA接口的使用
 ----------------------------

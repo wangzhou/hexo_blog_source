@@ -1,10 +1,12 @@
 ---
 title: pstack使用笔记
+tags:
+  - 软件调试
+description: >-
+  pstack的功能是显示当前进程中函数的调用栈的关系，若是多线程的情况下，
+  会显示各个线程中函数调用的关系。脚本用了gdb中的bt(backtrace)功能，在gdb中输入bt即可 打印出程序当前的栈中的函数调用关系。
+abbrlink: 8141fc42
 date: 2021-07-17 11:21:31
-tags: [软件调试]
-description: "pstack的功能是显示当前进程中函数的调用栈的关系，若是多线程的情况下，
-会显示各个线程中函数调用的关系。脚本用了gdb中的bt(backtrace)功能，在gdb中输入bt即可
-打印出程序当前的栈中的函数调用关系。"
 categories:
 ---
 

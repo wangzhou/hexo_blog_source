@@ -1,8 +1,12 @@
 ---
 title: riscv原子指令分析
+tags:
+  - riscv
+  - 计算机体系结构
+  - 原子指令
+description: 本文分析risvc中原子指令的定义，以及qemu里的实现方式，qemu的代码是6.2.50，riscv spec的版本是20191213
+abbrlink: cf66213a
 date: 2022-05-16 19:25:29
-tags: [riscv, 计算机体系结构, 原子指令]
-description: "本文分析risvc中原子指令的定义，以及qemu里的实现方式，qemu的代码是6.2.50，riscv spec的版本是20191213"
 categories:
 ---
 

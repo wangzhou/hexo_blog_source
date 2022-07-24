@@ -1,8 +1,11 @@
 ---
 title: SMMU SSV的逻辑
+tags:
+  - SMMU
+  - 计算机体系结构
+description: 本文描述SMMU协议中SSV的基本逻辑
+abbrlink: 43e9d8f4
 date: 2021-06-27 18:06:35
-tags: [SMMU, 计算机体系结构]
-description: "本文描述SMMU协议中SSV的基本逻辑"
 ---
 
 SMMU的STE表里的S1DSS=0b10时(目前的Linux主线内核代码是这样配置)，对于外设报文的

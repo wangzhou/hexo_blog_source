@@ -1,10 +1,14 @@
 ---
 title: 使用SMMU PMU查看性能数据
+tags:
+  - Linux内核
+  - perf
+  - SMMU
+description: >-
+  ARM的SMMU提供了性能相关的统计寄存器(Performance Monitor Counter Groups - PMCG)，
+  目前相关驱动已经合入Linux内核主线。我们可以配合用户态的perf工具使用。本文介绍具 体的使用方法。
+abbrlink: 9d7a5764
 date: 2021-06-19 10:30:16
-tags: [Linux内核, perf, SMMU]
-description: "ARM的SMMU提供了性能相关的统计寄存器(Performance Monitor Counter Groups - PMCG)，
-目前相关驱动已经合入Linux内核主线。我们可以配合用户态的perf工具使用。本文介绍具
-体的使用方法。"
 ---
 
 - 首先要确定使用的系统里有arm_smmuv3_pmu这个模块，或者它已经被编译进内核。

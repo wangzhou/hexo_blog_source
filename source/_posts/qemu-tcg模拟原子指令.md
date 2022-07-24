@@ -1,8 +1,11 @@
 ---
 title: qemu tcg模拟原子指令
+tags:
+  - QEMU
+  - 虚拟化
+description: qemu tcg中原子指令学习的一个速记，以riscv为平台。
+abbrlink: 46e3ba05
 date: 2022-01-26 23:11:35
-tags: [QEMU, 虚拟化]
-description: "qemu tcg中原子指令学习的一个速记，以riscv为平台。"
 categories:
 ---
 

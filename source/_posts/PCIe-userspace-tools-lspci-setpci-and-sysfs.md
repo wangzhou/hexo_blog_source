@@ -1,10 +1,15 @@
 ---
 title: 'PCIe userspace tools: lspci, setpci and sysfs'
+tags:
+  - 软件调试
+  - PCIe
+description: >-
+  From mj.ucw.cz/sw/pciutils we can get the code of lspci/setpci, which are two
+  useful tools to debug PCIe related problems. This doc just introduces these
+  two tools and also the sysfs interfaces which can be used in PCIe problem
+  debug.
+abbrlink: f1aca621
 date: 2021-07-05 22:41:09
-tags: [软件调试, PCIe]
-description: "From mj.ucw.cz/sw/pciutils we can get the code of lspci/setpci, which are two
-useful tools to debug PCIe related problems. This doc just introduces these
-two tools and also the sysfs interfaces which can be used in PCIe problem debug."
 categories:
 ---
 

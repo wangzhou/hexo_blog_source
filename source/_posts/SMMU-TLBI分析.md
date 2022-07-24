@@ -1,8 +1,12 @@
 ---
 title: SMMU TLBI分析
+tags:
+  - SMMU
+  - Linux内核
+  - 计算机体系结构
+description: 本文分析SMMU-v3 tlbi相关的硬件语义和linux相关驱动代码的实现。
+abbrlink: e96c7a44
 date: 2021-06-19 10:28:42
-tags: [SMMU, Linux内核, 计算机体系结构]
-description: "本文分析SMMU-v3 tlbi相关的硬件语义和linux相关驱动代码的实现。"
 ---
 
 1. SMMU E2H支持

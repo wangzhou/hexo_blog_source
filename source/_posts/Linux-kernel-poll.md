@@ -1,8 +1,10 @@
 ---
 title: Linux kernel poll
+tags:
+  - Linux内核
+description: Linux内核poll系统调用实现的分析。
+abbrlink: 4142aa42
 date: 2021-06-20 23:17:48
-tags: [Linux内核]
-description: "Linux内核poll系统调用实现的分析。"
 ---
 ```
 /* fs/select.c */

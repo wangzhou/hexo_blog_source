@@ -1,10 +1,14 @@
 ---
 title: qemu调试方法
+tags:
+  - QEMU
+  - 虚拟化
+description: >-
+  qemu自己提供了debug接口，可以观察到机器自身的状态，比如，可以查看程序运行
+  时CPU各个寄存器的变化。本文分析相关的使用方法和qemu代码逻辑。本文以一个简单的例子说明使用方式，以riscv平台为基础。以qemu user
+  mode为例 说明，system mode是一样的。分析中使用的qemu的版本是5.1.50
+abbrlink: 3f608912
 date: 2022-03-28 19:52:15
-tags: [QEMU, 虚拟化]
-description: "qemu自己提供了debug接口，可以观察到机器自身的状态，比如，可以查看程序运行
-      时CPU各个寄存器的变化。本文分析相关的使用方法和qemu代码逻辑。本文以一个简单的例子说明使用方式，以riscv平台为基础。以qemu user mode为例
-      说明，system mode是一样的。分析中使用的qemu的版本是5.1.50"
 categories:
 ---
 

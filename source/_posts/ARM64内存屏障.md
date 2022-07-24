@@ -1,10 +1,14 @@
 ---
 title: ARM64内存屏障
+tags:
+  - 计算机体系结构
+  - ARM64
+  - 内存屏障
+description: >-
+  本文试图梳理aarch64构架下的内存屏障的逻辑，细节的东西还要去看ARMv8的手册。其实， 《ARM Cortex-A Series
+  Programmer’s Guide for ARMv8-A》这本书的第13章，memory order已经对内存屏障的内容做了比较入门的讲解。
+abbrlink: 26672f2c
 date: 2021-07-05 22:27:54
-tags: [计算机体系结构, ARM64, 内存屏障]
-description: "本文试图梳理aarch64构架下的内存屏障的逻辑，细节的东西还要去看ARMv8的手册。其实，
- 《ARM Cortex-A Series Programmer’s Guide for ARMv8-A》这本书的第13章，memory
- order已经对内存屏障的内容做了比较入门的讲解。"
 categories:
 ---
 

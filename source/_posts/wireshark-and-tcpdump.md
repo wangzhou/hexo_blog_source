@@ -1,8 +1,11 @@
 ---
 title: wireshark and tcpdump
+tags:
+  - 网络
+  - wireshark
+description: 本文记录使用wireshark做tcpdump的简单步骤
+abbrlink: b5ef2a9
 date: 2021-07-11 23:32:47
-tags: [网络, wireshark]
-description: "本文记录使用wireshark做tcpdump的简单步骤"
 categories:
 ---
 

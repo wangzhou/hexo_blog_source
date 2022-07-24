@@ -1,8 +1,11 @@
 ---
 title: 使用perf trace跟踪IO缺页
+tags:
+  - 软件调试
+  - perf
+description: 本文以一个实例介绍如何使用perf trace跟踪Linux内核中的trace point
+abbrlink: e3e43140
 date: 2021-06-19 10:29:33
-tags: [软件调试, perf]
-description: "本文以一个实例介绍如何使用perf trace跟踪Linux内核中的trace point"
 ---
 
 使用perf list可以看到有trace point的软件定义的trace点。(fix me: 要开什么内核选项)

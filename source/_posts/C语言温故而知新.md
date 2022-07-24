@@ -1,8 +1,10 @@
 ---
 title: C语言温故而知新
+tags:
+  - C语言
+description: 用这个文章来记录一些C语言里的知识点
+abbrlink: 8946a9b9
 date: 2021-06-21 13:04:19
-tags: [C语言]
-description: "用这个文章来记录一些C语言里的知识点"
 ---
 1. 宏
 -----

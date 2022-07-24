@@ -1,10 +1,14 @@
 ---
 title: LDD3 study note 2
-date: 2021-07-05 22:39:58
-tags: [读书笔记, LDD3]
-description: "这篇文章在note1的基础上，进一步记录实现一个ioctl要注意的地方。相关的代码在：
-https://github.com/wangzhou/scull.git, tag: scull_2"
+tags:
+  - 读书笔记
+  - LDD3
+description: >-
+  这篇文章在note1的基础上，进一步记录实现一个ioctl要注意的地方。相关的代码在：
+  https://github.com/wangzhou/scull.git, tag: scull_2
 categories: read
+abbrlink: 715ce853
+date: 2021-07-05 22:39:58
 ---
 
 1. ioctl

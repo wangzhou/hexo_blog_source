@@ -1,8 +1,10 @@
 ---
 title: PCIe memory base and memory limit
+tags:
+  - PCIe
+description: 本文分析PCIe协议中mem base/limit的相关语意
+abbrlink: 77399f99
 date: 2021-07-11 23:39:53
-tags: [PCIe]
-description: "本文分析PCIe协议中mem base/limit的相关语意"
 categories:
 ---
 

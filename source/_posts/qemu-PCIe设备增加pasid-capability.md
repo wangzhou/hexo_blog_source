@@ -1,8 +1,11 @@
 ---
 title: qemu PCIe设备增加pasid capability
+tags:
+  - QEMU
+  - PCIe
+description: 本文介绍给一个qemu pcie设备增加pasid capability要注意的问题。
+abbrlink: f921b9b3
 date: 2021-07-26 14:10:39
-tags: [QEMU, PCIe]
-description: "本文介绍给一个qemu pcie设备增加pasid capability要注意的问题。"
 categories:
 ---
 

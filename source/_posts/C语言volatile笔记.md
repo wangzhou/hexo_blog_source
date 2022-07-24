@@ -1,8 +1,10 @@
 ---
 title: C语言volatile笔记
+tags:
+  - C语言
+description: 本文介绍C语言里的volatile关键词的使用方法。
+abbrlink: b7523820
 date: 2021-07-05 22:35:27
-tags: [C语言]
-description: "本文介绍C语言里的volatile关键词的使用方法。"
 categories:
 ---
 

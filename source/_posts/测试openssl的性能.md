@@ -1,8 +1,13 @@
 ---
 title: 测试openssl的性能
+tags:
+  - 加解密
+  - openssl
+description: >-
+  文本介绍openssl性能测试的相关方法，包括openssl自带的speed测试，加硬件engine的测试。并且简单分析下openssl
+  speed测试的代码。
+abbrlink: c413143d
 date: 2021-06-19 09:59:34
-tags: [加解密, openssl]
-description: "文本介绍openssl性能测试的相关方法，包括openssl自带的speed测试，加硬件engine的测试。并且简单分析下openssl speed测试的代码。"
 ---
 1. openssl基本命令
 ------------------

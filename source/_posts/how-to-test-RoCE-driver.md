@@ -1,9 +1,12 @@
 ---
 title: how to test RoCE driver
+tags:
+  - RDMA
+description: >-
+  This document shares how to do a sanity test for a RoCE driver. If you are a
+  new guy for RoCE, it is for you.
+abbrlink: 79c3f639
 date: 2021-05-22 12:43:48
-tags: [RDMA]
-description: "This document shares how to do a sanity test for a RoCE driver.
-If you are a new guy for RoCE, it is for you."
 ---
 how to test RoCE driver
 -----------------------

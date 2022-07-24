@@ -1,9 +1,16 @@
 ---
 title: Linux IO DMA地址映射流程分析
+tags:
+  - Linux内核
+  - DMA
+  - iommu
+  - SMMU
+  - 页表
+description: >-
+  本文分析Linux内核中IO DMA地址映射的流程，其中涉及到的具体iommu硬件以及驱动， 我们分析ARM
+  SMMUv3的相关的实现。分析内容基于Linux主线5.13-rc4。
+abbrlink: eecc1f14
 date: 2021-06-27 23:17:20
-tags: [Linux内核, DMA, iommu, SMMU, 页表]
-description: "本文分析Linux内核中IO DMA地址映射的流程，其中涉及到的具体iommu硬件以及驱动，
-我们分析ARM SMMUv3的相关的实现。分析内容基于Linux主线5.13-rc4。"
 ---
 
 1. SMMU页表以及相关配置的初始化流程

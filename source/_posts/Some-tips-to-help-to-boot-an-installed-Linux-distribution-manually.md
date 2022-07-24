@@ -1,9 +1,12 @@
 ---
 title: Some tips to help to boot an installed Linux distribution manually
+tags:
+  - UEFI
+description: >-
+  If your Linux system fails to boot up normally, this may be a way to boot it
+  up from UEFI command manually
+abbrlink: 4014887b
 date: 2021-07-05 22:32:24
-tags: [UEFI]
-description: "If your Linux system fails to boot up normally, this may be a way
-to boot it up from UEFI command manually"
 categories:
 ---
 

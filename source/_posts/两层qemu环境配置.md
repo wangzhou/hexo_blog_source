@@ -1,10 +1,13 @@
 ---
 title: 两层qemu环境配置
+tags:
+  - QEMU
+  - 虚拟化
+description: >-
+  本文介绍qemu启动的系统里再起一个qemu的环境配置。这样可以搭建一个完全虚拟的
+  虚拟化环境，方便调试虚拟化相关的东西。本文说明整个搭建的逻辑，并搭建一个arm64 的qemu in qemu的环境。
+abbrlink: f921b1e9
 date: 2021-09-17 22:55:24
-tags: [QEMU, 虚拟化]
-description: "本文介绍qemu启动的系统里再起一个qemu的环境配置。这样可以搭建一个完全虚拟的
-      虚拟化环境，方便调试虚拟化相关的东西。本文说明整个搭建的逻辑，并搭建一个arm64
-      的qemu in qemu的环境。"
 categories:
 ---
 

@@ -1,8 +1,11 @@
 ---
 title: Linux透明大页(THP)分析
+tags:
+  - Linux内核
+  - 内存管理
+description: 本文简单介绍Linux内核透明大页的概念、使用方式和代码
+abbrlink: 7bfba555
 date: 2021-06-19 10:05:48
-tags: [Linux内核, 内存管理]
-description: "本文简单介绍Linux内核透明大页的概念、使用方式和代码"
 ---
 
 0. THP是什么
