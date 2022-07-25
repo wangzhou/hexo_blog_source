@@ -1,0 +1,76 @@
+---
+title: qemu tcg中断模拟
+abbrlink: 8198
+date: 2022-07-25 15:44:42
+tags: [qemu, 中断]
+description: "记录qemu irq相关的代码逻辑，以riscv为例。分析使用的qemu代码的版本是6.2.0。"
+categories:
+---
+
+qemu tcg整体的翻译执行流程大概如下：
+```
+ setjmp;
+
+ while (检查并处理中断或异常) {
+        前端翻译;
+        后端翻译;
+        执行host执行改变guest CPU状态; // 有异常时longjmp到setjmp处
+ }
+```
+所以，实际响应并处理中断总是在一个tb翻译执行完。qemu有chained tb，如果一直在chained
+tb里跳来跳去，那不是一直响应不了中断，为此qemu里的中断可以触发跳过一个tb的执行，
+这样，一旦有中断来了，就可以快速响应，下面会介绍这个地方。
+
+```
+/* target/riscv/cpu.c */
+qdev_init_gpio_in(DEVICE(cpu), riscv_cpu_set_irq, 12)
+```
+注册一个向cpu写入中断的接口。
+
+从逻辑上分析，应该是中断控制器调用这个接口把中断写入到cpu。qemu上和riscv相关的中断
+控制器有两个qemu/hw/intc/sifive_plic.c和riscv_aclint.c，前者和外部设备相关，后者
+是核内部的中断控制器，主要产生时钟中断和SWI。
+
+qemu中断实现依赖gpio，向一个gpio上写入信息，逻辑上应该触发gpio handler被调用一次。
+这块的基本逻辑应该是: 调用qdev_init_gpio_in给CPU创建一个输入的GPIO，在中断控制器
+里使用qdev_init_gpio_out创建一个输出的GPIO，然后使用qdev_connect_gpio_out把输出GPIO
+和输入的GPIO连在一起，在中断控制器里使用qemu_set_irq/qemu_raise_irq向CPU发中断，本质
+上是触发riscv_cpu_set_irq被调用到。(gpio_in对应的qemu_irq.handler如何被gpio_out看见?)
+
+riscv_cpu_set_irq修改riscv系统寄存器mip，把中断号写入到里面。
+```
+riscv_cpu_set_irq
+  -> riscv_cpu_update_mip
+       /*
+        * 写cpu->interrupt_request, 大循环里的cpu_handle_irq根据这个判断是否
+        * 要处理中断
+	*/
+    -> cpu_interrupt
+      -> cpu->interrupt_request |= mask;
+      -> qatomic_set(&cpu_neg(cpu)->icount_decr.u16.high, -1);
+```
+注意写icount_decr.u16.high的这个逻辑。qemu在一个tb的前端翻译的前后会插入一段翻译
+的代码，相关逻辑在gen_intermediate_code->translator_loop->gen_tb_start/gen_tb_end，
+gen_tb_start中产生的逻辑会检测如上icount_decr.u16.high的值，如果比0小，就会直接跳到
+tb最后的一个label处，这个label在gen_tb_end里配置，这样，中断一旦写了icount_decr.u16.high
+这个标记，tb执行的时候就会跳过当前tb的业务代码，相当于空执行了一个tb。这个跳转直接
+跳过了chained tb的地方，所以可以从chained tb里出来。
+```
+/*
+ * cpu_handle_irq里调用cpu_exec_interrupt回调函数处理中断，riscv_cpu_exec_interrupt
+ * 从mip里拿到中断号, 最后调用riscv_cpu_do_interrupt处理中断。riscv_cpu_exec_interrupt在
+ * target/riscv/cpu_helper.c
+ */
+riscv_cpu_exec_interrupt
+     /* 拿到中断号 */
+  -> interruptno = riscv_cpu_local_irq_pending(env);
+     /*
+      * 注意这里会配置exception_index这个值，这个值在异常处理
+      * cpu_handle_exception里也会读
+      */
+  -> cs->exception_index = RISCV_EXCP_INT_FLAG | interruptno;
+     /* riscv在这个里一并处理异常和中断，改变机器的状态和pc，最后清exception_index */
+  -> riscv_cpu_do_interrupt(cs);
+       /* RISCV_EXCP_NONE是-1 */
+    -> cs->exception_index = RISCV_EXCP_NONE
+```

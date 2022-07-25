@@ -1,0 +1,241 @@
+---
+title: qemu tcg翻译执行核心逻辑分析
+abbrlink: 37414
+date: 2022-07-25 15:45:52
+tags: [qemu]
+description: "本文分析qemu tcg翻译执行的核心逻辑。分析代码用的qemu版本是5.1.50。"
+categories:
+---
+
+翻译执行循环基本逻辑
+--------------------
+
+ 整个模拟CPU执行指令的过程就是一个不断翻译执行的循环，当指令执行过程中有中断或者
+ 异常，整个翻译执行的循环被打断，处理中断或者异常。异常是执行指令的时候触发的，qemu
+ 在翻译执行的时候通过一个长跳转跳出循环，处理完异常，异常改变CPU状态和PC，qemu处理完
+ 异常后，从新PC位置继续翻译执行(这个新PC一般就是异常处理向量的入口)。中断是外设
+ 异步产生的，qemu在每次翻译执行的循环执行一次后，再次执行翻译执行之前检查下中断，
+ 如果有中断，qemu就处理中断，和异常一样，qemu改变CPU状态和PC后，再次进入翻译执行
+ 的循环。
+```
+ setjmp;
+
+ while (检查并处理中断或异常) {
+        前端翻译;
+        后端翻译;
+        执行host执行改变guest CPU状态; // 有异常时longjmp到setjmp处
+ }
+```
+ qemu在翻译的时候不是逐条guest指令翻译的，而是把一堆guest指令翻译到一个translation
+ block(tb)里，执行也是以tb为单位。qemu针对tb做了一些优化，它把已经翻译的tb放到哈希表
+ 里，需要翻译的时候先查表，找到了就可以直接在host上运行tb里翻译好的指令，省去翻译
+ 的过程，在这个基础上，如果tb和tb之间有跳转关系，qemu也可以在前一个tb里加指针，直接
+ 指向下一个tb，一个tb执行完成，直接跳到下一个tb执行，这样连上面查表的过程也省去了，
+ 这样的tb叫chained tb，宏观上看，qemu执行时，如果都是chained tb，完全有可能翻译过
+ 一次后，再次执行的时候都在tb之间直接跳来跳去，没有翻译和查tb hash表的过程。
+
+ 整个翻译的逻辑都在tb_gen_code里。
+
+ 要理解具体的翻译执行的细节需要，需要了解整个机器是怎么起来的。qemu启动的时候时候，
+ 会在如下的流程里初始化所谓accelerator的东西，qemu把tcg和kvm看成是qemu翻译执行的
+ 两种加速器，如下就是相关初始化的配置，我们这里只关心tcg。
+```
+ main
+   +-> qemu_init
+     +-> configure_accelerators
+       +-> do_configure_accelerator
+         +-> accel_init_machine(accel, current_machine)
+               /*
+                * tcg的init_machine定义在accel/tcg/tcg-all.c, tcg_accel会被qemu
+                * 定义成一个类对象。tcg init_machine的回调函数是tcg_init
+                */
+           +-> acc->init_machine (tcg_init)
+             +-> tcg_exec_init
+                   /*
+                    * tcg_ctx是TCGContext, 线程变量，是tb翻译执行的上下文. 每个
+                    * tb里都有一个断前导代码，这个代码用来在真正执行tb里的host
+                    * 指令的时候，做环境的准备。下面这个函数生成这段前导的指令。
+                    * 从下面可见tb的结尾时的代码也在这里生成了，前后都在准备和
+                    * 恢复执行tb的这个host函数的上下文，中间的br是跳掉tb的业务
+                    * 逻辑里执行业务代码。
+                    */
+               +-> tcg_prologue_init(tcg_ctx)
+                     /* 我们这里假设host是arm64，tcg/aarch64/tcg-target.c.inc */
+                 +-> tcg_target_qemu_prologue
+                     /*
+                      * 如上的这个函数里，用代码生成了一段arm64的汇编，大概是：
+                      * (这个可以-d out_asm，通过输出host的反汇编得到)
+                      *  stp      x29, x30, [sp, #-0x60]!
+                      *  mov      x29, sp
+                      *  stp      x19, x20, [sp, #0x10]
+                      *  stp      x21, x22, [sp, #0x20]
+                      *  stp      x23, x24, [sp, #0x30]
+                      *  stp      x25, x26, [sp, #0x40]
+                      *  stp      x27, x28, [sp, #0x50]
+                      *  sub      sp, sp, #0x480
+                      *  mov      x19, x0        <------ 第一个入参保存cpu结构体地址
+                      *  br       x1             <------ 第二个入参保存的是生成指令地址
+                      *  movz     w0, #0         <------ 这个地址保存到TCGContext的code_gen_epilogue
+                      *  add      sp, sp, #0x480
+                      *  ldp      x19, x20, [sp, #0x10]
+                      *  ldp      x21, x22, [sp, #0x20]
+                      *  ldp      x23, x24, [sp, #0x30]
+                      *  ldp      x25, x26, [sp, #0x40]
+                      *  ldp      x27, x28, [sp, #0x50]
+                      *  ldp      x29, x30, [sp], #0x60
+                      *  ret      
+                      *
+                      *  这些生成的指令被放到TCGContext的code_ptr, code_gen_prologue
+                      *  也指向相同的一片buf。
+                      */
+```
+ 
+ 各个CPU线程的初始化流程是：
+```
+ /* target/riscv/cpu.c */
+ riscv_cpu_realize
+       /* softmmu/cpus.c */
+   +-> qemu_init_vcpu
+         /* 拉起guest cpu的线程, tcg的回调定义在accel/tcg/tcg-cpus.c */
+     +-> cpus_accel->create_vcpu_thread  // tcg_start_vcpu_thread
+       +-> qemu_thread_create拉起线程: tcg_cpu_thread_fn
+           /* 如上线程的主体就是上面翻译执行的主循环 */
+```
+
+前端翻译
+--------
+ 
+ 前端翻译在gen_intermediate_code里完成, 翻译成的中间码都挂到了tcg_ctx的ops链表里。
+ 这里有几个相关的数据结构：TranslationBlock tb, TCGContext tcg_ctx, DisasContextBase dcbase。
+ tb是指一个具体翻译块，tcg_ctx是一个CPU的翻译上下文，对于每个具体的翻译块，进入和
+ 出来翻译翻译块的host二进制都是相同的，就是上面prologue中的二进制。tb中翻译的业务
+ 代码的host二进制在一个翻译上下文中产生，并添加到tb的各种缓存结构中。(todo：还没有
+ 找见tcg_ctx的到一个tb时，新建tb中host二进制存储空间的地方)。dcbase用于前端翻译，
+ 前端翻译可以看作是guest二进制反汇编成qemu中间指令的过程，想必disas context的命名
+ 也来自这里。
+```
+ tb_gen_code
+   +-> gen_intermediate_code
+         /* 这里翻译就是把一个个的guest指令得到的中间码连同操作数挂到ops链表里 */
+     +-> translator_loop
+   +-> tcg_gen_code
+```
+
+ 前端翻译中，我们会涉及TCGv以及helper函数的概念。TCGv从概念的角度可以看成是中间码
+ 使用的寄存器，前端模拟实现一个指令的时候，要用到临时变量的时候，都要申请一个这样
+ 的寄存器。比如，我们看下riscv的add指令的前端翻译的实现：
+```
+ static bool trans_add(DisasContext *ctx, arg_add *a)
+ {
+     return gen_arith(ctx, a, &tcg_gen_add_tl);
+ }
+
+ static bool gen_arith(DisasContext *ctx, arg_r *a,
+                       void(*func)(TCGv, TCGv, TCGv))
+ {
+     TCGv source1, source2;
+     source1 = tcg_temp_new();        <------ A
+     source2 = tcg_temp_new();
+ 
+     gen_get_gpr(source1, a->rs1);    <------ B
+     gen_get_gpr(source2, a->rs2);
+ 
+     (*func)(source1, source1, source2);
+ 
+     gen_set_gpr(a->rd, source1);
+     tcg_temp_free(source1);
+     tcg_temp_free(source2);
+     return true;
+ }
+
+ static inline void gen_get_gpr(TCGv t, int reg_num)
+ {
+     if (reg_num == 0) {
+         tcg_gen_movi_tl(t, 0);
+     } else {
+         tcg_gen_mov_tl(t, cpu_gpr[reg_num]);     <------ C
+     }
+ }
+```
+ 在A行，我们申请了一个source1 TCGv, 在C行，我们把add指令的rs1寄存器上的值传递给
+ source1，后续继续使用source1参与计算。source1和guest寄存器实际上都是保存在host
+ 的内存上的，实际运行的时候，host上的程序其实做的就是内存数据搬移的操作。后续add
+ 指令的模拟，在中间码的层面看是把source1/source2相加，host实际计算的时候要把数据
+ 移动到寄存器上计算，所以直接翻译可能是这样的：reg1 = load(rs1的内存), store(reg1, source1的内存),
+ reg1 = load(source1的内存), 同样的方式把rs2保存的值加载到reg2，reg3 = add(reg1, reg2),
+ store(reg3, rd的内存), 最后可能就优化成了reg1 = load(rs1的内存), reg2 = load(rs2的内存),
+ reg3 = add(reg1, reg2), store(reg3, rd的内存)。
+
+ 我们实际看个模拟执行的例子，使用-d in_asm,op,out_asm得到guest汇编、中间码和host汇编：
+```
+ IN: test_add
+ 0x0000000000010430:  1101              addi            sp,sp,-32
+ 0x0000000000010432:  ec22              sd              s0,24(sp)
+ 0x0000000000010434:  1000              addi            s0,sp,32
+ [...]
+ 
+ OP:
+  ld_i32 tmp0,env,$0xfffffffffffffff0
+  movi_i32 tmp1,$0x0
+  brcond_i32 tmp0,tmp1,lt,$L0
+ 
+  ---- 0000000000010430
+  mov_i64 tmp2,x2/sp
+  movi_i64 tmp3,$0xffffffffffffffe0
+  add_i64 tmp2,tmp2,tmp3
+  mov_i64 x2/sp,tmp2
+  [...]
+ 
+ OUT: [size=192]
+ 0xffff7c025c00:  b85f0274  ldur     w20, [x19, #0xfffffffffffffff0]		[tb header & initial instruction]
+ 0xffff7c025c04:  7100029f  cmp      w20, #0
+ 0xffff7c025c08:  5400052b  b.lt     #0xffff7c025cac
+ 0xffff7c025c0c:  f9400a74  ldr      x20, [x19, #0x10]    <----- 10430
+ 0xffff7c025c10:  d1008294  sub      x20, x20, #0x20
+ 0xffff7c025c14:  f9000a74  str      x20, [x19, #0x10]
+ [...]
+```
+ 就只看第一条addi指令的模拟过程，这是test_add这个函数一进来开栈的指令，把sp向低地址
+ 移动32。可以看到中间码是和前端翻译过程相对应的，先把寄存器值和-32保存到TCGv变量上，
+ 然后对TCGv做add运算，然后把运算结果保存回sp。最终翻译得到的host代码，把sp的值load
+ 到x20，计算后再存回cpu结构体的对应位置，x19保存就是cpu结构体的地址。
+
+ 具体代码实现上，TCGv这个变量的数值其实就是对应变量相对于存储空间基地址的偏移。
+ 这个存储空间不只是有描述cpu的结构体(riscv上是CPURISCVState)，还有TCGContext，CPU
+ 的寄存器都是存在cpu结构体里的，上面这个例子的sp就是这样。TCGContext保存变量的逻辑
+ 还没有搞清。前端翻译只是把这些信息都挂到中间码的链表里，得到host指令在后端翻译里。
+
+ qemu可以用生成的host指令模拟guest，也可以直接调用host上的函数改变guest CPU的状态，
+ 后者在qemu里叫helper函数。理论上，所有的模拟都可以用helper函数，但是，显然helper
+ 函数会降低模拟的速度。
+
+ 以riscv为例，增加一个helper函数的一般套路是: 1. 在target/riscv/op_helper.c里增加
+ 函数的定义；2. 在target/riscv/helper.h增加对应的宏，宏的参数分别是：helper函数名字、
+ 函数的返回值、函数的入参；3. 在中间码里用gen_helper_xxx直接调用helper函数，返回值
+ 保存在gen_helper_xxx的第一个参数里，常数入参需要用tcg_const_i32/i64生成下常数TCGv，
+ 实际上是为这个常数分配中间码存储空间(todo)。
+
+ helper函数的实现逻辑是生成函数调用的上下文，然后跳转到函数的地址执行指令，也就是
+ 先把函数的入参放到寄存器上，然后调用跳转指令跳到函数地址执行。
+
+
+后端翻译
+--------
+
+ 后端翻译在tcg_gen_code里，核心是在一个循环里处理前端翻译的中间码，把中间码翻译成
+ host上的汇编。
+
+执行
+----
+
+ 执行翻译好的host指令是在大循环的cpu_loop_exec_tb里。翻译好的host汇编的整体逻辑
+ 如上面prologue的样子，tb里的业务代码对应的host汇编通过中间的br指令调用。tb对应的
+ 业务代码对应的host汇编，也就是前端翻译、后端翻译一起得到的host二进制放在tb->tc.ptr
+ 指向的地址，prologue的二进制放在tcg_ctx->code_gen_prologue指向的地址。tb->tc.ptr
+ 在函数调用的时候被放到了x1寄存器，这个和br x1也是相对应的。
+```
+ cpu_loop_exec_tb
+   +-> cpu_tb_exec
+     +-> tcg_qemu_tb_exec(env, tb->tc.ptr)
+       +-> tcg_ctx->code_gen_prologue(env, tb->tc.ptr)
+```
