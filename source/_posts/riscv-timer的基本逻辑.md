@@ -1,0 +1,80 @@
+---
+title: riscv timer的基本逻辑
+tags:
+  - riscv
+  - 计算机体系结构
+  - qemu
+description: 本文梳理riscv上timer的基本软硬件逻辑，硬件模型基于qemu，使用的qemu版本是6.2.0， 内核代码分析使用的版本是v5.12-rc8。
+abbrlink: 1040
+date: 2022-08-11 21:08:08
+categories:
+---
+
+基础逻辑
+---------
+
+ riscv上有两个最基本的中断控制器aclint和plic，前者的全称是Advanced Core Local
+ Interruptor，是核内的中断控制器，主要是用来产生timer中断和software中断，后者的全称
+ 是Platform Level Interruptor Controller，主要用来收集外设的中断，plic通过外部中断
+ 向CPU报中断。
+
+ timer相关的寄存器以及寄存器域段有: mip/mie里和timer相关的域段，mtime以及mtimecmp。
+ mie里有控制timer中断使能的bit: MTIE/STIE，控制M mode和S mode timer interrupter是否
+ 使能，mip里有表示是否存在pending的timer中断的bit: MTIP/STIP。
+
+ mtime是一个可读可写的计数器，其中的数值以一定的时间间隔递增，计数器计满后会回绕，
+ mtimecmp寄存器里的数值用来和mtime做比较，当mtime的值大于等于mtimecmp的值，并且
+ MTIE使能时，M mode timer中断被触发。
+
+ 软件可以在timer中断处理函数里，更新mtimecmp的值，从而维持一个固定周期的时钟中断，
+ 一般这个中断就是Linux内核的时钟中断。软件可以写STIP触发一个S mode timer中断。
+
+ NOTE: sstc
+
+qemu逻辑
+---------
+
+ qemu中的aclint和plic的代码路径分别在：hw/intc/riscv_aclint.c和hw/intc/sifive_plic.c。
+ 这里我们只关注和timer相关的部分，可以看到在riscv_aclint.c里只有M mode timer中断的
+ 触发代码。
+
+ 在qemu上跑内核的时候，发现总是一个M mode timer中断跟着一个S mode timer中断，然后
+ 再跟一个S mode ecall。qemu里并没有触发S mode timer的代码，可以猜测S mode timer中断
+ 是在opensbi里触发的。
+
+ 整个逻辑是：当mtime大于等于mtimecmp时触发一个M mode中断，opensbi里的中断处理逻辑
+ 会写STIP，由于S mode time中断已经被委托到S mode处理，在M mode返回S mode后，S mode
+ timer中断就会被触发。
+```
+ /* opensbi/lib/sbi/sbi_trap.c */
+ sbi_trap_handler
+   +-> sbi_trap_noaia/ais_irq
+     +-> sbi_timer_process
+           /* 如果没有SSTC特性，才这样处理 */ 
+       +-> csr_set(CSR_MIP, MIP_STIP)
+```
+ S mode timer中断处理函数里通过S mode ecall写mtimecmp，为下一次M mode timer中断配置
+ 合理的数值。这里面可能有一个问题，mtime如果触发中断后不往前走，就会有时间上的误差，
+ 可以想象，如果mtime在中断触发后依然往前走，就不会有这个问题。
+
+ 查看qemu aclint的代码，其中使用QEMU_CLOCK_VIRTUAL这个时钟来计算mtime寄存器里的值,
+ 而QEMU_CLOCK_VIRTUAL是来自host上获取时间的函数clock_gettime/get_clock_realtime，
+ 获取的是一个不断流逝的时间值。
+
+ 说到虚拟机的timer，就有一个问题要问，虚拟机里的时间和真实世界里的时间数值上一样么？
+ 我们看下aclint驱动配置timecmp时，qemu里的timer中断定时是怎么处理里。
+```
+ riscv_aclint_mtimer_write
+   +-> riscv_aclint_mtimer_write_timecmp
+     +-> ns_diff = muldiv64(diff, NANOSECONDS_PER_SECOND, timebase_freq)
+```
+ 如上，使用传进来的timecmp值，计算出timer中断间隔的实际值，然后在host上启动一个
+ 定时器来做模拟，timebase_freq是mtime寄存器作为counter的频率，所以实际时间的计算
+ 就是：(mtimecmp - 上一个中断点的mtime值) * 1/timebase_freq * NANOSECONDS_PER_SECOND，
+ 单位是ns，就是上面muldiv64函数的计算结果。所以，虚拟机看到的时间和实际时间是一样的。
+
+Linux内核逻辑
+--------------
+
+ 内核timer初始化在：arch/riscv/kernel/time.c, time_init
+ 内核相关驱动的位置在：drivers/clocksource/timer-riscv.c

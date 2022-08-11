@@ -29,7 +29,7 @@ ENTRY(handle_exception)
 	/*
 	 * n: 交换tp寄存器和scratch寄存器里的值。如果exception从用户态进来，tp和
 	 * scratch的值应该是相等的(下面在离开内核的时候，会把用户进程的task_struct
-	 * 指针赋给tp)，如果exception从内核态进来，tp应该是内核的task_struct
+	 * 指针赋给tp)，如果exception从内核态进来，tp应该是当前线程的task_struct
 	 * 指针，scratch应该是0。
 	 *
 	 * 所以，下面紧接着的处理中，如果从内核进来，要恢复下tp。
