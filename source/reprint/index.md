@@ -17,3 +17,8 @@ comments: false
    转载的是蜗窝科技翻译的文章。此文甚好，系统软件人员值得阅读:
 
    http://www.wowotech.net/kernel_synchronization/Why-Memory-Barriers.html
+
+ - 原理和实战解析Linux中的如何正确地使用内存屏障
+
+   宋宝华老师讲解Linux中内存屏障的文章，内存深入浅出：
+   https://www.eet-china.com/mp/a159006.html
