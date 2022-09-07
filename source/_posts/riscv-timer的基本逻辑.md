@@ -3,7 +3,7 @@ title: riscv timer的基本逻辑
 tags:
   - riscv
   - 计算机体系结构
-  - qemu
+  - QEMU
 description: 本文梳理riscv上timer的基本软硬件逻辑，硬件模型基于qemu，使用的qemu版本是6.2.0， 内核代码分析使用的版本是v5.12-rc8。
 abbrlink: 1040
 date: 2022-08-11 21:08:08

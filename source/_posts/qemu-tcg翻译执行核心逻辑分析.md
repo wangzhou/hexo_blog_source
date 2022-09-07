@@ -2,7 +2,7 @@
 title: qemu tcg翻译执行核心逻辑分析
 abbrlink: 37414
 date: 2022-07-25 15:45:52
-tags: [qemu]
+tags: [QEMU]
 description: "本文分析qemu tcg翻译执行的核心逻辑。分析代码用的qemu版本是5.1.50。"
 categories:
 ---

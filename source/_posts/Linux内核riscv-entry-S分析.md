@@ -12,7 +12,6 @@ date: 2022-07-24 22:07:59
 categories:
 ---
 
-
 ```
 /* n: 在非抢占的情况下，下面两个符号等价 */
 #if !IS_ENABLED(CONFIG_PREEMPTION)
@@ -333,7 +332,7 @@ ret_from_exception:
 resume_userspace:
 	/* Interrupts must be disabled here so flags are checked atomically */
 	REG_L s0, TASK_TI_FLAGS(tp) /* current_thread_info->flags */
-	/* n: 哪里会配置这个值？(这个估计要结合调度看下) 定义在arch/riscv/include/asm/thread_info.h */
+	/* n: todo: 哪里会配置这个值？(这个估计要结合调度看下) 定义在arch/riscv/include/asm/thread_info.h */
 	andi s1, s0, _TIF_WORK_MASK
 	bnez s1, work_pending
 
@@ -435,6 +434,20 @@ restore_all:
 /* n: 开抢占的时候，在恢复上下文之前要先处理下抢占 */
 #if IS_ENABLED(CONFIG_PREEMPTION)
 resume_kernel:
+	/*
+	 * n: 取thread_info里的preempt_count, 如果是非0，那么是禁止抢占的, 就直接
+	 *    跳到restore_all, 不做后面的调度, 否则就继续往下走，查看是否需要调度，
+	 *    需要做调度，就执行下调度。
+	 *
+	 *    所谓抢占就是一个线程执行被被动的中断，然后CPU上换另一个线程的上下文
+	 *    执行，所以，一个线程主动放弃CPU，换另一个线程上CPU执行肯定不是抢占，
+	 *    所以，抢占具体实施的点就是像在中断或异常的时候，处理完中断或异常，
+	 *    然后调度一下，这个时候就可能调度其他的线程到CPU上跑。
+	 *
+	 *    内核里又加了一个禁止抢占的标记，就是上面preempt_count这个变量，当
+	 *    这个变量是0的时候，是可以抢占的，当这个变量大于0，是不能抢占的。
+	 *    这样，就有可能出现，中断处理完但是不能抢占的情况。
+	 */
 	REG_L s0, TASK_TI_PREEMPT_COUNT(tp)
 	bnez s0, restore_all
 	REG_L s0, TASK_TI_FLAGS(tp)

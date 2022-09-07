@@ -2,7 +2,7 @@
 title: qemu tcg中断模拟
 abbrlink: 8198
 date: 2022-07-25 15:44:42
-tags: [qemu, 中断]
+tags: [QEMU, 中断]
 description: "记录qemu irq相关的代码逻辑，以riscv为例。分析使用的qemu代码的版本是6.2.0。"
 categories:
 ---

@@ -2,7 +2,7 @@
 title: qemu tcg访存指令模拟
 abbrlink: 19272
 date: 2022-07-25 15:45:10
-tags: [qemu, 内存管理]
+tags: [QEMU, 内存管理]
 description: "本文分析qemu tcg里关于load/store的流程，以riscv平台为分析对象。qemu的版本是5.1.50。"
 categories:
 ---

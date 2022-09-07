@@ -2,7 +2,7 @@
 title: qemu monitor介绍
 abbrlink: 51086
 date: 2022-07-25 15:47:29
-tags: [qemu, 软件调试]
+tags: [QEMU, 软件调试]
 description: "本文介绍qemu monitor的一些使用方法，使用qemu调试问题的时候可以参考。分析使用
       的qemu版本是6.2.0。"
 categories:
