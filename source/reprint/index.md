@@ -20,5 +20,10 @@ comments: false
 
  - 原理和实战解析Linux中的如何正确地使用内存屏障
 
-   宋宝华老师讲解Linux中内存屏障的文章，内存深入浅出：
+   宋宝华老师讲解Linux中内存屏障的文章，内容深入浅出：
    https://www.eet-china.com/mp/a159006.html
+
+ - 深入理解cache对写好代码至关重要
+
+   宋宝华老师讲解cache的文章，内容深入浅出：
+   https://cloud.tencent.com/developer/article/1844992
