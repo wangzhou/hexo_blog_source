@@ -78,3 +78,30 @@ Linux内核逻辑
 
  内核timer初始化在：arch/riscv/kernel/time.c, time_init
  内核相关驱动的位置在：drivers/clocksource/timer-riscv.c
+
+ 如上的timer驱动里会注册timer中断的处理函数riscv_timer_interrupt, 这个函数会进一步
+ 调用clock_event_device里的event_handler回调函数，但是这个回调函数并不是在驱动里
+ 直接提供的。
+
+ event_handler的注册逻辑是通过这个驱动里注册的cpu hotplu回调函数riscv_timer_starting_cpu
+ 完成的，大概的调用逻辑如下：
+```
+start_kernel
+  +-> time_init
+    +-> timer_probe
+      +-> cpuhp_setup_state
+        +-> __cpuhp_setup_state
+          +-> __cpuhp_setup_state_cpuslocked
+            +-> cpuhp_issue_call
+              +-> cpuhp_invoke_callback
+                +-> riscv_timer_starting_cpu
+                  +-> clockevents_config_and_register
+                    +-> clockevents_register_device
+                      +-> tick_check_new_device
+                        +-> tick_setup_device
+                          +-> tick_setup_periodic
+			        /* event_handler回调 */
+			    +-> tick_handle_periodic
+```
+ tick_handle_periodic就是每次时钟中断时要运行的逻辑，相关逻辑已经和调度有关系，
+ 在另外讲调度的文章里独立分析吧。

@@ -1,0 +1,62 @@
+---
+title: riscv aclint逻辑分析
+tags:
+  - riscv
+  - 计算机体系结构
+  - 中断
+description: >-
+  本文主要分析riscv aclint的定义和内核实现。aclint使用https://github.com/riscv/riscv-aclint
+  上发布的版本，内核使用v5.19-rc8，qemu使用7.1.50。
+abbrlink: 435
+date: 2022-09-25 21:17:24
+categories:
+---
+
+基本逻辑
+---------
+
+ aclint是riscv上的核内中断本地中断控制器, 协议已经发布，内核(还没有到主线)和qemu
+ 中均已经做了支持。它的功能比较简单，就是提供了时钟中断和核间中断的功能。实现上，
+ 所有功能都是通过MMIO寄存器控制的，协议上抽象出了Machine-level Timer Device, 
+ Machine-level Software Interrupt Device以及Supervisor-level Software Interrupt
+ Device三个设备。
+
+ 这里有几个概念要先分清楚，clint(core local interrupt)是和aclint(Advanced clint)
+ 独立的协议, clint发布在前，aclint兼容clint，发布在后。
+
+ qemu 7.1.50已经支持了aclint，但是如果想要打开，要在qemu启动命令行里加上-machine virt,aclint=on。
+ qemu启动加不加aclint=on，在qemu monitor里用info qtree查看设备, 会发现mtimer没有
+ 变化，但是swi在aclint=1的时候，多了一个，两个swi设备其中一个是clint的mswi, 一个是aclint
+ 的sswi。对应的在dts上，aclint没有开的时候，只是一个riscv,clint0节点，aclint打开之后
+ 变成了，mtimer/sswi/mswi三个节点, compatible分别是：riscv,aclint-mtimer/riscv,aclint-sswi/riscv,aclint-mswi。
+
+ 内核v5.19-rc8还没有支持aclint, 但是社区已经有patch在review。
+
+Machine-level Timer Device
+---------------------------
+
+ Timer的基本逻辑我们在[riscv timer的基本逻辑](https://wangzhou.github.io/riscv-timer的基本逻辑/)里已经介绍。
+
+Software Interrupt
+-------------------
+
+ 本文重点看看软件中断这部分。
+
+ clint下，只有M mode下的msip寄存器, 这个寄存器的最低bit读写被映射到CSR寄存器MIP的
+ MSIP bit，写这个bit可以触发其他核的M mode soft interrupt。
+
+ aclint下，兼容上面的msip寄存器，新增加了SETSSIP寄存器，并把msip寄存器和SETSSIP
+ 寄存器封装到了MSWI设备(Machine-level Software Interrupt Device)和
+ SSWI(Supervisor-level Software Interrupt Device)设备里。
+
+ 在开启aclint时，qemu会创建mswi和sswi设备，同时通过device tree上报两个设备节点。
+ qemu这块的代码在hw/intc/riscv_aclint.c, 用一套代码同时支持了mswi和sswi，虽然是
+ 一个读写接口，但是代码里用RISCVAclintSwiState里的sswi区分mswi和sswi。
+
+ 读写接口的实现和aclint协议是对应的，读接口上，是sswi时，返回0，是mswi时，返回MIP
+ 寄存器MIP_MSIP bit的值，写接口上，当写入值是1时，sswi和mswi都触发一个高电平中断
+ (协议上说是边沿中断)，当写入值是0时，mswi把中断线拉低，sswi没有动作。
+
+ 因为，aclint还没有在内核主线，内核目前使用msip的方式触发IPI，会看到内核会调用
+ S mode的ecall把触发IPI的请求交给BIOS处理，我们看到opensbi目前的实现，在处理IPT
+ 请求时是直接写了下MIP寄存器的MIP_SSIP。
