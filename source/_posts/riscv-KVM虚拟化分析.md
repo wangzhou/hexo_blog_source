@@ -162,47 +162,6 @@ categories:
 
 随后独立考虑中断虚拟化。
 
-qemu riscv H扩展基本逻辑
-------------------------
-
- qemu支持riscv H扩展的基本逻辑主要集中在中断和异常的处理逻辑，新增寄存器支持，以及
- 新增虚拟化相关指令的支持。
-```
- riscv_cpu_do_interrupt
-       /* 从V状态进入HS，会把sxxx寄存器保存到vsxxx，把xxx_hs推到sxxx里 */
-   +-> riscv_cpu_swap_hypervisor_regs(env)
-       /* 保存当前状态 */
-   +-> env->hstatus = set_field(env->hstatus, HSTATUS_SPVP, env->priv);
-       /* 保存当前V状态 */
-   +-> env->hstatus = set_field(env->hstatus, HSTATUS_SPV, riscv_cpu_virt_enabled(env));
-       /* 保存异常gpa地址 */
-   +-> htval = env->guest_phys_fault_addr;
-       /* 后面可以看到cause, 异常pc, tval都是靠S mode寄存器报给软件的, 最后把模式切到S mode */
-   +-> riscv_cpu_set_mode(env, PRV_S);
-```
- 在sret/mret指令里会处理V状态以及寄存器的倒换：
-```
- helper_sret
-     /* 在H扩展打开的分支里会有如下的硬件操作 */
-   +-> prev_priv = get_field(mstatus, MSTATUS_SPP);
-   +-> prev_virt = get_field(hstatus, HSTATUS_SPV);
-   +-> hstatus = set_field(hstatus, HSTATUS_SPV, 0);
-   +-> mstatus = set_field(mstatus, MSTATUS_SPP, 0);
-   +-> mstatus = set_field(mstatus, SSTATUS_SIE, get_field(mstatus, SSTATUS_SPIE));
-   +-> mstatus = set_field(mstatus, SSTATUS_SPIE, 1);
-   +-> env->mstatus = mstatus;
-   +-> env->hstatus = hstatus;
-       /* 如果之前是V状态使能的，这里要做寄存器的倒换: 把S mode寄存器保存到xxx_hs，把vsxxx寄存器存到S mode寄存器里 */
-   +-> riscv_cpu_swap_hypervisor_regs(env);
-       /* 使能V状态 */
-   +-> riscv_cpu_set_virt_enabled(env, prev_virt);
-```
- 
- 新增了vsxxx以及hxxx寄存器的访问代码。新增加的虚拟化相关的指令大概分两类，一类是
- 和虚拟化相关的TLB指令，一类是虚拟化相关的访存指令，可以直接查看他们的qemu实现,
- TLB相关的指令依然是刷新全部TLB，访存相关的指令和普通访存指令的实现基本一样，不同
- 的是在mem_idx上增加了TB_FLAGS_PRIV_HYP_ACCESS_MASK，表示要做两级地址翻译。
-
 qemu kvm的基本逻辑
 -------------------
 
@@ -240,7 +199,28 @@ qemu kvm的基本逻辑
 ```
  
 riscv H扩展spec分析
--------------------
+--------------------
+
+ riscv H扩展的目的是在硬件层面创建出一个虚拟的机器出来，基于此可以支持各种类型的
+ 虚拟化，比如，可以在linux上支持KVM。先不考虑中断和外设，我们看看要创建一个虚拟机
+ 我们需要些什么，我们需要GPR寄存器、系统寄存器以及一个“物理”地址空间，在这个虚拟机
+ 里运行的程序认为这就是他们的全部世界。我们可以把host的GPR和host的系统寄存器给虚拟
+ 机里的程序用，对于每个虚拟机和host，当他们需要运行的时候，由一个更底层的程序把他们
+ 的GRP值和系统寄存器值换到物理GPR和系统寄存器上，这样每次虚拟机和虚拟机切换、虚拟机
+ 和host切换都要切全部寄存器。不同虚拟机不能直接使用host物理地址作为他们的“物理”地址
+ 空间，如果这样，就好小心划分host物理地址，避免虚拟机物理地址之间相互影响，我们会
+ 再加一个层翻译，这层翻译把虚拟机物理地址翻异成host物理地址，虚拟机自身看不到这层
+ 翻译，虚拟机正常做load/store访问(先假设load/store访问的是虚拟机物理地址)，load/store
+ 执行的时候会查tlb，可能做page walk，还可能报缺页异常，这些在虚拟机的世界里都不感知，
+ 查tlb和做page talk是硬件自己搞定的，处理缺页是更加底层的程序搞定的(hypvisor)。
+ 为了支持这层翻译以及相关的异常，就需要在给硬件加相关的寄存器，可以想象，我们要增加
+ 这层翻译对应的页表的基地址寄存器，还要增加对应的异常上下文寄存器，这些寄存器在虚拟
+ 机切换的时候都要切换成对应虚拟机的。
+
+ 只有host的时候，只要一层翻译就好，但是如果是运行在虚拟机里的系统，就需要两级翻译，
+ 运行在虚拟机里的系统自己不感知是运行在虚拟机上的，但是，硬件需要知道某个时刻是运行
+ 的是guest还是host的系统，这样硬件需要有一个状态表示，当前运行的是guest还是host的
+ 系统。
 
  riscv的H扩展增加了CPU的状态，增加了一个隐式的V状态，当V=0的时候，CPU的U/M状态还和
  之前是一样的，S状态处在HS状态，当V=1的时候，CPU原来的U/S状态变成了VU/VS状态。
@@ -256,15 +236,85 @@ riscv H扩展spec分析
  htval, htinst, hgatp, guest对应的寄存器有：vsstatus, vsip, vsie, vstvec, vsscratch, vsepc,
  vscause, vstval, vsatp。
 
- 对于这些系统寄存器，我们可以大概分为两类，一类静态配置的，一类是系统运行时会改变的，
- 比如，hedeleg/hideleg表示是否要把HS的中断继续委托到VS去处理，这个就会提前静态配置好，
- 比如像hip/hie这种中断相关的寄存器，就可以灵活配置。这些寄存器具体使用的时候的行为
- 比较有意思，VS在实际运行的时候会把配置的值copy到S mode的寄存器上，在退出V状态的时候
- 再把S mode的寄存器上的值保存会VS状态的寄存器上，不过要让guest内核可以直接运行到KVM上，
- 原来使用的寄存器名字也是不能改变的。当系统从V状态切到HS时，V被配置成0，同时把之前
- 保存的S mode寄存器copy到S mode寄存器上，HS工作的时候使用S mode寄存器，同时使用hypervisor
- 寄存器里的静态配置信息，当从HS离开的时候，硬件会把当前S mode寄存器里的值保存到硬件里。
+ 对于这些系统寄存器，我们可以大概分为两类，一类是配置hypvisor的行为的，一类是VS/VU
+ 的映射寄存器。我们一个一个寄存器看下。VS/VU的映射寄存器就是CPU在运行在V状态时使用
+ 的寄存器，这些寄存器基本上是S mode寄存器的翻版，riscv spec提到，当系统运行在V状态
+ 时，硬件的控制逻辑依赖这组vs开头的寄存器，这时对S mode相同寄存器的读写被映射到vs
+ 开头的这组寄存器上。
 
+ hedeleg/hideleg表示是否要把HS的中断继续委托到VS去处理，在进入V模式前，如果需要，
+ 就要提前配置好。具体的委托情况可以参考[这里](https://wangzhou.github.io/riscv中断异常委托关系分析/)
+
+ hgatp是第二级页表的基地址寄存器。
+
+ hvip用于给虚拟机VS mode注入中断，写VSEIP/VSTIP/VSSIP域段，会给VS mode注入相关中断，
+ riscv spec里没有说，注入的中断在什么状态下会的到响应？
+
+ hip/hie是hypvisor下中断相关的pending和enable控制。hip/hie包含hvip的各个域段，除了
+ 如上的域段，还有一个SGEIP域段。hip/hie和sip/sie有什么区别？
+
+ 罗列出riscv上所有的中断类型，S mode/M mode/VS mode的外部中断/时钟中断/软件中断
+ 这些一共下来就是9种中断类型，再加上supervisor guest external interrupt。
+ VSEI和SGEI有什么区别？
+
+ hgeip/hgeie是SGEI的pending和enable控制，hip里的SGEIP是只读域段，只有在hgeip/hgeie
+ 各个域段相与结果非零hip的SGEIP才是0，所以hip里的SGEIP看起来是一个指示位。如果hgeip/hgeie
+ 是一个64bit的寄存器，那么它的1-63bit可以表示1-63个vcpu的SGEI pending/enable bit。
+ vcpu怎么响应这个直通的中断？首先硬件必须感知当前运行的是不是V mode，在是V mode
+ 的时候感知是不是hgeip/hgeie中指定的vcpu。todo: 直通中断的逻辑分析？
+ 
+ htval/htinst是HS异常时的参数寄存器。htval用来存放guest page fault的IPA，其他情况
+ 暂时时0，留给以后扩展。两级翻译的具体流程在独立的文档中描述。
+
+ 这些寄存器的qemu实现比较有意思，VS在实际运行的时候会把vs开头寄存器中配置的值copy
+ 到S mode的寄存器上，把HS mode的寄存器中原来的值，存在硬件里。qemu上VS实际运行依赖
+ 的还是S mode寄存器上的当前状态，qemu的实现如果和协议一样，qemu在VS时对S mode寄存器
+ 的改写应该同时写到vsxxx这组寄存器上，VS状态的实际控制应该依赖于vsxxx这组寄存器，
+ qemu目前的实现应该逻辑上也是对的。要让guest内核可以直接运行到KVM上，原来使用的
+ 寄存器名字也是不能改变的。
+
+ 在退出V状态的时候再把S mode的寄存器上的值保存会VS状态的寄存器上，同时把之前保存
+ 在硬件里的HS mode的寄存器的值写入S mode寄存器。HS工作的时候使用S mode寄存器，同时
+ 使用hypervisor寄存器里的配置信息。
+
+ 实际硬件的物理实现可能只需要做一个映射就好，并不需要qemu中类似的拷贝，如下是上面
+ 逻辑的示意图。
+
+ 虚拟机开始运行，HS切入VS的示意：
+```
+1. 配置vsxxx寄存器
+                   |
+                   |
+                   v
+ +-- vsstatus vsip ... vsatp ---- status  sip  ...  satp ---------+ <---- 寄存器接口
+ |                                ^     \                         |
+ |                               /       \                        |
+ |    3. copy vsxxx to HS       /         \     2. save HS mode   |
+ |       register or map vsxxx /           \       register in    |
+ |       to HS register       /             \      hardware or    |
+ |                           /               \     stop mapping   |
+ |                          /                 v                   | <---- 硬件
+ |   vsstatus vsip ... vsatp      status_hs  sip_hs ...  satp_hs  |
+ |                                                                |
+ +----------------------------------------------------------------+
+ sret的硬件逻辑完成步骤2和步骤3。
+```
+
+ 虚拟机停止运行，VS/VU切入HS：(初始状态是虚拟机跑在S mode寄存器上)
+```
+ +-- vsstatus vsip ... vsatp ---- status  sip  ...  satp ---------+ <---- 寄存器接口
+ |                                /     ^                         |
+ |                               /       \                        |
+ |    1. copy HS mode register  /         \    2. copy HS register|
+ |       to vsxxx or stop      /           \      saved in hw to  |
+ |       mapping              /             \     register or do  |
+ |                           /               \    mapping         |
+ |                          v                 \                   | <---- 硬件
+ |   vsstatus vsip ... vsatp      status_hs  sip_hs ...  satp_hs  |
+ |                                                                |
+ +----------------------------------------------------------------+
+ 中断或者异常的硬件处理逻辑完成步骤1和步骤2。
+```
  所以，从总体上看，不管是在HS还是VS，实际运行的时候使用的都是S mode的寄存器。当HS是处理
  hypervisor的业务时，使用hypervisor相关寄存器里的定义。
 
@@ -273,6 +323,47 @@ riscv H扩展spec分析
  这些指令提供在U/M/HS下的带两级地址翻译的访存功能，也就是虽然V状态没有使能，用这些指令依然可以
  得到gva两级翻译后的pa。
 
+qemu riscv H扩展基本逻辑
+------------------------
+
+ qemu支持riscv H扩展的基本逻辑主要集中在中断和异常的处理逻辑，新增寄存器支持，以及
+ 新增虚拟化相关指令的支持。
+```
+ riscv_cpu_do_interrupt
+       /* 从V状态进入HS，会把sxxx寄存器保存到vsxxx，把xxx_hs推到sxxx里 */
+   +-> riscv_cpu_swap_hypervisor_regs(env)
+       /* 保存当前状态 */
+   +-> env->hstatus = set_field(env->hstatus, HSTATUS_SPVP, env->priv);
+       /* 保存当前V状态 */
+   +-> env->hstatus = set_field(env->hstatus, HSTATUS_SPV, riscv_cpu_virt_enabled(env));
+       /* 保存异常gpa地址 */
+   +-> htval = env->guest_phys_fault_addr;
+       /* 后面可以看到cause, 异常pc, tval都是靠S mode寄存器报给软件的, 最后把模式切到S mode */
+   +-> riscv_cpu_set_mode(env, PRV_S);
+
+```
+ 在sret/mret指令里会处理V状态以及寄存器的倒换：
+```
+ helper_sret
+     /* 在H扩展打开的分支里会有如下的硬件操作 */
+   +-> prev_priv = get_field(mstatus, MSTATUS_SPP);
+   +-> prev_virt = get_field(hstatus, HSTATUS_SPV);
+   +-> hstatus = set_field(hstatus, HSTATUS_SPV, 0);
+   +-> mstatus = set_field(mstatus, MSTATUS_SPP, 0);
+   +-> mstatus = set_field(mstatus, SSTATUS_SIE, get_field(mstatus, SSTATUS_SPIE));
+   +-> mstatus = set_field(mstatus, SSTATUS_SPIE, 1);
+   +-> env->mstatus = mstatus;
+   +-> env->hstatus = hstatus;
+       /* 如果之前是V状态使能的，这里要做寄存器的倒换: 把S mode寄存器保存到xxx_hs，把vsxxx寄存器存到S mode寄存器里 */
+   +-> riscv_cpu_swap_hypervisor_regs(env);
+       /* 使能V状态 */
+   +-> riscv_cpu_set_virt_enabled(env, prev_virt);
+```
+ 
+ 新增了vsxxx以及hxxx寄存器的访问代码。新增加的虚拟化相关的指令大概分两类，一类是
+ 和虚拟化相关的TLB指令，一类是虚拟化相关的访存指令，可以直接查看他们的qemu实现,
+ TLB相关的指令依然是刷新全部TLB，访存相关的指令和普通访存指令的实现基本一样，不同
+ 的是在mem_idx上增加了TB_FLAGS_PRIV_HYP_ACCESS_MASK，表示要做两级地址翻译。
 
 运行情况跟踪
 -------------
