@@ -1,0 +1,173 @@
+---
+title: riscv内存管理相关指令整理
+tags:
+  - riscv
+  - 内存管理
+description: >-
+  本文分析riscv内存管理相关的指令，主要包括，内存序、TLB无效化以及cache无效化
+  的相关指令。分析使用的内核版本是v6.0，qemu版本是7.1.50，opensbi的版本是v1.1, riscv privilige
+  ISA的版本是20211203，CMO的版本是20220513。
+abbrlink: 49143
+date: 2022-11-10 20:22:30
+categories:
+---
+
+涉及的指令
+----------
+```
++-------------+-------------------+----------------------------+
+|memory order:| fence fence.i     |                            |
+|	      | sfence.w.inval    |                            |
+|             | sfence.inval.ir   |                            |
++-------------+-------------------+----------------------------+
+|TLB invalid: | sfence.vma        |    hfence.vvma hfence.gvma |
+|             | sinval.vma        |                            |
++-------------+-------------------+----------------------------+
+|cache      : | CMO extension                                  |
++-------------+-------------------+----------------------------+
+```
+如上是rv里和内存管理相关的指令一个总结，虚拟化相关的放在了右边，cache无效化相关
+的指令在rv上在一个独立的扩展里介绍的：https://github.com/riscv/riscv-CMOs
+
+下面我们逐条指令分析下：(先不考虑虚拟化相关的指令)
+
+内存序指令
+----------
+
+ - fence
+
+   fence指令是RV的基本指令，定义在非特权ISA spec里。fence是数据访问的fence指令，
+   通过参数可以控制fence指令制造出的约束。
+
+ - fence.i
+
+   RV协议在Zifencei扩展里定义fence.i, Zifencei在RV的非特权级ISA定义里。fence.i只是
+   对单核起作用，它保证是本核指令改动和CPU取指令之间的顺序，比如，软件改动了指令
+   序列，希望CPU可以fetch改动后的指令，就必须加一个fence.i指令，这个指令确保CPU
+   之前对指令的改动已经生效。
+
+   协议里对多核的描述是，改动指令的核需要先执行一个fence指令，然后在其他核上均执行
+   一个fence.i指令，才能保证如上的语意。软件上可以看到的一个场景是进程迁移的场景，
+   一个进程开始在核A上，修改了自己的将要执行的指令，然后迁移到核B上去继续执行修改
+   后的指令，在迁移之前就需要执行fence指令，再在核B上执行fence.i。
+ 
+   内核里主要是在arch/riscv/mm/cacheflush.c里使用fence.i，里面的使用方式叫remote
+   fence.i，就是多核的时候，触发其他核上执行fence.i，目前是用IPI实现的。单核调用
+   fence.i的场景没有发现。
+```
+ flush_icache_all
+       /*
+        * 如果有SBI的只是，那么走这个分支，其中会发S mode ecall把remote fence.i
+        * 发到opensbi处理。下面的remote sfence.vma也是一样的处理方式，我们在下面
+        * 展开说明opensbi里的处理方式。
+        */
+   +-> sbi_remote_fence_i
+       /*
+        * 如果不支持SBI，在kernel(S mode)就可以直接发IPI，触发其它核执行fence.i,
+        * 内核的IPI机制细节待分析。
+        */
+   +-> on_each_cpu(ipi_remote_fence_i, NULL, 1)
+```
+
+TLB无效化指令
+-------------
+
+ - sfence.vma
+
+   sfence.vma是定义在RV特权级ISA里的指令，我们可以简单把它理解成带barrier的tlb无效
+   化指令。
+
+   所谓barrier，保证的是修改页表和CPU做page walk的顺序，这两个操作之间需要加sfence.vma，
+   保证CPU后面做page walk的时候拿到的时候修改之后的页表。
+
+   这个指令支队单核起作用，多核之间做页表和tlb的同步在RV上需要多条指令完成，显然
+   目前的做法，效率是不高的。多核之间做页表和tlb同步的常见是很常见的，比如，多线程
+   共用一个虚拟地址空间，而且多个线程跑到多个核上，那么一个核修改了页表，其他核上
+   的tlb就需要做无效化。RV协议上给出的方案是，修改页表的核修改页表后执行fence，这个
+   保证叫所有核看见页表的修改，然后发IPI给其它核，其他核上的IPI处理函数执行sfence.vma，
+   做完后通知修改页表的核。RV协议上叫这个过程是：模拟TLB shutdown。
+
+ - sinval.vma
+
+   sinval.vma和sfence.vmao功能类似，区别在于sinval.vma不带barrier。
+
+   sfence.vma的使用集中在内核arch/riscv/mm/tlbflush.c，分为local和remote的使用方式，
+   local就是在单核上使用，remote就是多核之间使用，做多核的页表和TLB同步。我们这里
+   只看下remote sfence.vma的实现。
+```
+ flush_tlb_all
+   +-> sbi_remote_sfence_vma
+     +-> __sbi_rfence(SBI_EXT_RFENCE_REMOTE_SFENCE_VMA, cpu_mask, start, size, 0, 0)
+           /*
+            * sbi的协议这里改过，前一个是v0.1的版本，最新的基于v0.2的版本，这里就是
+            * 内核和BIOS的接口，接口表现为一个S mode的ecall请求。
+            */
+       +-> __sbi_rfence_v02
+```
+   下面是opensbi里的实现：
+```
+ /* opensbi的C语言部分的入口，核启动时会调用sbi_init做初始化，其中包括ipi和tlb的初始化 */
+ sbi_init
+   +-> init_coldboot
+         /* lib/sbi/sbi_tlb.c */
+     +-> sbi_ipi_init
+         /*
+          * 初始化一个核上处理tlb的相关资源，主要包括一个fifo队列，以及发送、处理
+          * 和同步要用的回调函数。
+          */
+     +-> sbi_tlb_init
+
+ /*
+  * 如上内核里来的S mode ecall情况对应opensbi里的处理流程如下, _trap_handler是
+  * opensbi里异常处理的入口。
+  */
+ _trap_handler 
+       /* lib/sbi/sbi_trap.c */
+   +-> sbi_trap_handler
+         /*
+          * M mode中断处理入口，这里是处理remote sfence.vma的入口，发送remote
+          * sfence.vma的核走的是下面sbi_ecall_handler的流程。最下面我们用一个图
+          * 说明下整个逻辑。
+          */
+     +-> sbi_trap_noaia_irq
+       +-> sbi_ipi_process
+         +-> ipi_ops->process          <---- tlb_process
+         /* lib/sbi/sbi_ecall.c */
+     +-> sbi_ecall_handler
+           /* 对应的rfence handler在sbi_ecall_replace.c里注册 */
+       +-> ext->handler  <---- sbi_ecall_rfence_handler
+             /* 如上的函数处理SBI里定义的全部RFENCE请求，我们这里只看sfence.vma */
+         +-> sbi_tlb_request
+           +-> sbi_ipi_send_many
+             +-> sbi_ipi_send
+                   /* 使用上面sbi_init流程里注册的回调函数 */
+               +-> ipi_ops->update      <---- tlb_update
+               +-> ipi_ops->send	<---- mswi_ipi_send 
+               +-> ipi_ops->sync	<---- tlb_sync
+```
+   我们画一个示意图说明问题：
+```
+ kernel:
+
+            |  core 0                     core 1           core 2
+            |
+            |  remote sfence.vma
+            v
+ opensbi:  ----------------------------------------------------------------------
+            ^
+            |  _trap_handler
+            |  |              触发核间中断
+            |  v  update/send  -------->  _trap_handler
+            |                             |
+            |                             v
+            |     sync         <--------     process(sfenc.vma and update flag)
+            |      |
+            +------+
+```
+   总结下，opensbi完全在M mode模拟了TLB的多核广播，从内核视角看，core0发起remote
+   sfence.vma，这个调用返回时，已经完成多核之间的TLB同步。
+
+cache相关指令
+-------------
+
+   todo
