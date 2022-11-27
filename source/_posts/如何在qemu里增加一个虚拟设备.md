@@ -194,5 +194,5 @@ smmuv3_read_mmio addr: 0x9c val:0x2a size: 0x4(0)
 ```
  如上的日志，smmuv3前缀的是qemu的trace，时间戳开头的是内核驱动的打印。
 
-[1] https://github/wangzhou/qemu/blob/dma_engine_sample/hw/misc/dma_engine.c
-[2] https://github/wangzhou/linux/tree/dma_engine_demo/drivers/misc/dma_engine
+[1]https://github.com/wangzhou/qemu/blob/4612113da02716e8c56930e88ca8a142e180f175/hw/misc/dma_engine.c
+[2]https://github.com/wangzhou/linux/blob/87695695e4d3ea72e60d9c5da5fc5804ae71fb48/drivers/misc/dma_engine/dma_engine.c
