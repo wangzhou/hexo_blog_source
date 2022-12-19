@@ -59,7 +59,7 @@ plic基本设计
  注意，每个外设的中断在plic里也只能pending一个，这个设计就有点简单了。plic有target
  context的概念，简单看就是一个core上，M mode外部中断是一个target context，S mode
  外部中断是一个target context，前面说过，理论上每个输入plic的中断都可以输出到任何
- 一个core的任何一个target context上，plic可以通过下面的enble register使能和关闭
+ 一个core的任何一个target context上，plic可以通过下面的enable register使能和关闭
  相关的输出路径，可见enable register是一个中断源和target context相乘之积大小的配置表。
 
  plic中的配置全部通过MMIO接口进行，所支持的中断的pending和enable也都全部在MMIO配置，
