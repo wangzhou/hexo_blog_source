@@ -202,4 +202,4 @@ interface
 一个例子
 --------
  
- 这里写一个dma engine的qemu设备。
+ 这里写了一个dma engine的qemu设备作为[例子](https://wangzhou.github.io/如何在qemu里增加一个虚拟设备/)。
