@@ -143,7 +143,7 @@ categories:
 
  - riscv.hart_array 
    
-   似乎是riscv hart，不过只定义了reset函数。
+   相关分析细节可以看[这里](https://wangzhou.github.io/riscv-qemu-virt平台CPU拓扑分析/)
 
  - riscv pmu
 
