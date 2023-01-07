@@ -26,12 +26,25 @@ ENTRY(handle_exception)
 	 * register will contain 0, and we should continue on the current TP.
 	 */
 	/*
-	 * n: 交换tp寄存器和scratch寄存器里的值。如果exception从用户态进来，tp和
-	 * scratch的值应该是相等的(下面在离开内核的时候，会把用户进程的task_struct
+	 * n: 交换tp寄存器和scratch寄存器里的值。如果exception从用户态进来，scratch
+	 * 的值应该是task_struct(下面在离开内核的时候，会把用户进程的task_struct
 	 * 指针赋给tp)，如果exception从内核态进来，tp应该是当前线程的task_struct
 	 * 指针，scratch应该是0。
 	 *
 	 * 所以，下面紧接着的处理中，如果从内核进来，要恢复下tp。
+	 *
+	 * 总结下在用户态和内核态时tp和scratch的值是什么：
+	 *
+	 *  +----------+--------------+---------------+
+	 *  |          | user space   |   kernel      |
+	 *  +----------+--------------+---------------+
+	 *  | tp:      | tls base     |   task_struct |
+	 *  +----------+--------------+---------------+
+	 *  | scratch: | task_struct  |   0           |
+	 *  +----------+--------------+---------------+
+	 *
+	 * 注意：配置tp为tls地址的函数是：copy_thread，如果用户态没有使用TLS，tp
+	 *       在用户态的值是？
 	 */
 	csrrw tp, CSR_SCRATCH, tp
 	/* n: tp不为0，异常来自用户态，直接跳到上下文保存的地方 */
@@ -607,3 +620,30 @@ ENTRY(__user_rt_sigreturn)
 END(__user_rt_sigreturn)
 #endif
 ```
+```
+        -+- task_struct           low address      <--- tp
+         |  (thread_info)
+         |
+         |  struct thread_struct thread
+ stack   |
+ size    |
+         |
+         |
+         |
+         |
+         |
+         |
+         |
+         |
+         |
+         +-+-
+         | |                                          ^
+         | |  PT_SIZE_ON_STACK                        |
+         | |                                          |
+        -+-+- sp end                high address      |
+```
+ 如上是一个线程对应的内核栈和task_struct在内存中的存储格式。栈底在sp end的位置，
+ task_struct在sp end - 栈大小的位置，内核栈会分出PT_SIZE_ON_STACK的大小，用来保存
+ 中断异常时的寄存器上下文，PT_XX的宏就是这个区里的偏移。thread_info放在task_struct
+ 的一开始，用来暂存体系结构相关的一些数据。thread也在task_struct里，在__switch_to
+ 里使用，用TASK_THREAD_XX_XX表示相关的偏移。
