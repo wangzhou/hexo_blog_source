@@ -137,5 +137,4 @@ struct pci_bus *pci_create_root_bus(struct device *parent, int bus,
 	...
 }
 
-[1] 关于linux中resource结构对资源的管理可以参看:
-    http://www.linuxidc.com/Linux/2011-09/43708.htm
+[1] 关于linux中resource结构对资源的管理可以参看: http://www.linuxidc.com/Linux/2011-09/43708.htm

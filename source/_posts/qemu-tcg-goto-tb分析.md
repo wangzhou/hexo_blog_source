@@ -1,0 +1,204 @@
+---
+title: qemu tcg goto_tb分析
+tags:
+  - QEMU
+description: 分析goto tb什么要在一个page内，使用的qemu代码的版本是v7.1.50，分析基于riscv构架。
+abbrlink: 7063
+date: 2023-01-20 17:38:26
+categories:
+---
+
+goto tb分析
+------------
+
+ [qemu tcg跳转的处理](https://wangzhou.github.io/qemu-tcg跳转的处理/)中分析了qemu
+ 中模拟跳转的逻辑，其中提到了chained tb的概念，chained tb中有一个限制，这个在它
+ 的代码实现里看出来：两个chained tb对应的guest指令需要在同一个guest的page里。下面
+ 分析这样限制的原因。
+
+```
+      VA1 ---> +---------------+ 
+               |               |
+               |               |  map1
+               |               | ----------+
+               |               |           |
+               |               |           |
+      VA2 ---> +---------------+           |        +---------------+ <--- PA1
+               |               |           |        |               |
+               |               |  map2     +------> |               |
+               |               | ------+            |               |
+               |               |       |            |               |
+               |               |  map3 |            |               |
+               +---------------+ ----+ |            +---------------+ <--- PA2
+                                     | |            |               |
+                                     | +----------> |               |
+                                     |              |               |
+                                     |              |               |
+                                     |              |               |
+                                     |              +---------------+ <--- PA3
+                                     |              |               |
+                                     +------------> |               |
+                                                    |               |
+                                                    |               |
+                                                    |               |
+                                                    +---------------+
+     tb1 key: pa1
+     +-------+ <---------------------+   <------ htable
+     |       |                       |
+     |       |                       |
+     +-------+                       |
+         |                           |
+         |                           |
+         |                           |
+         v tb2 key: pa2              |
+     +-------+ <-------------+       |
+     |       |               |       |
+     |       |               |       |
+     +-------+               |       |
+                             |       |
+                             |       |
+     tb_jmp_cache key: va    |       |
+     +--------------------------------------------------------------+
+     |                      va2     va1                             |
+     +--------------------------------------------------------------+
+```
+ qemu在翻译执行的时候，对于tb有两个cache，首先所有生成的tb都会放到htable这个哈希表，
+ 这个是我们这里说的第一个cache，这个哈希表的key是guest代码块的起始pa以及一些其它的
+ flag，另外一个cache叫tb_jmp_cache，这个是很简单的用guest代码块的起始va做key(这个
+ cache和本文分析的问题无关，对于它的分析，我们单独放到最后)。
+
+ htable用pa以及flag做key，在翻译执行的时候首先会用va查tlb得到pa，如果tlb里没有缓存，
+ 那就触发page table walk或者取指令异常，终归是要把pa找到并填到tlb里。
+
+ 当程序运行时，一段代码的位置，从va看是不变的，但是代码的物理存储位置可能是变化的，
+ 比如上图中从map2到map3映射的改变。从htable的设计上看，当这种映射关系改变的时候，
+ 旧映射对应的tb就应该从htable里删掉。
+
+ chained tb还需要面对的一个问题是，如果被指向的tb对应的guest指令被修改了怎么办，
+ 比如，上面tb2对应的guest指令被修改了，之前得到tb2显然是不能用了。qemu使用了一个叫
+ PageDesc的软件结构管理guest的物理内存，管理的单位是guest的页大小，一个PageDesc
+ 对应一个guest页，PageDesc记录着相关guest页对应的所有tb，理论上看，如果一个guest
+ 页上的指令有修改，qemu只要找到修改的guest指令对应的tb块，把这个tb块从chained tb
+ 的链条里移除就好。说说容易，真实做起来比较复杂，qemu这里做了两个事情，一个是只要
+ 看到有guest指令被修改，就把这一页上的指令对应的tb都移除，第二个就是goto_tb对应的
+ guest指令只能在一页，这样，把整个页对应的tb都移除，就把chained tb链条里的两个tb
+ 一下都移除了。
+
+ PageDesc初始化的地方是page_init函数，可以看出相关的位置是各种tcg资源初始化的地方:
+```
+ /* accel/tcg/tcg-all.c */
+ tcg_init_machine
+   +-> page_init
+         /*
+          * 这个函数里初始化PageDesc的各级表项的配置，它和页表类似的用一个多级表
+          * 管理整个物理地址空间。
+          *
+          * 对于riscv 44bit的物理地址空间来说，如果一个PageDesc管理4KB的页面，
+          * 整个物理地址空间的管理分为两级，第二级一项管理1K个页面，那么第一级有
+          * 44 - 12 - 10 = 22，2 ^ 22项。
+          */
+     +-> page_table_config_init
+   +-> tb_htable_init
+       /* tcg后端翻译需要的资源 */
+   +-> tcg_init
+```
+ 通过物理地址找见PageDesc的函数：
+```
+ page_find_alloc
+```
+ 把一个tb加入到一个PageDesc里：
+```
+ tb_page_add 
+       /*
+        * 把tb插入first_tb指向的链表的第一个节点，n是1表示有指令跨域了一个page，
+        * 那么就要在两个page对应的PageDesc中都要做记录。
+        *
+        * 实际上在riscv的qemu tcg模型里，只有一种跨page边界的情况，我们把这个逻辑
+        * 独立放到下面。
+        */
+   +-> tb->page_next[n] = p->first_tb
+   +-> p->first_tb = tb | n
+       /*
+        * 如果是第一次给这个PageDesc加tb，就是这个page上的指令第一次翻译出tb块，
+        * 把对应page的dirty bit清理(初始化)下。
+        *
+        * 如下的dirty bit和qemu里虚拟机的热迁移有关系。
+        */
+   +-> tlb_protect_code(page_addr)
+         /* softmmu/physmem.c */
+     +-> cpu_physical_memory_test_and_clear_dirty
+```
+ 从PageDesc里去掉一个tb，直接从链表里去掉对应的tb即可：
+```
+ tb_page_remove(p, tb)
+```
+ 
+ PageDesc里tb被去掉的调用路径：(to do test)
+```
+ store_helper
+   +--> notdirty_write(env_cpu(env), addr, size, full, retaddr);
+     +-> tb_invalidate_phys_page_fast(pages, ram_addr, size, retaddr);
+       +-> tb_invalidate_phys_page_range__locked
+         +-> tb_phys_invalidate__locked(tb);
+           +-> do_tb_phys_invalidate(tb, true);
+             +-> qht_remove(&tb_ctx.htable, tb, h)
+```
+
+ 我们可以把gdb的断点设在tb_invalidate_phys_page_range__locked上，然后运行一段自修改
+ 代码([自修改代码可以参考这里](https://9to5answer.com/how-to-write-self-modifying-code-in-c))，看看实际运行的效果。
+
+指令垮页分析
+-------------
+
+ 实际上，在riscv 7.1.50的qemu tcg模拟中，只有一个4B指令跨越页边界这一种情况存在了。
+```
+ riscv_tr_translate_insn
+   [...]
+   /* Only the first insn within a TB is allowed to cross a page boundary. */  
+   if (ctx->base.is_jmp == DISAS_NEXT) {                                       
+       /*
+        *  pc_first       pc_next
+        *      |            |
+        *  |   v       |    v      |
+        *  +-----------+-----------+
+        *  |   Page    |   Page    |
+        *
+        */
+       if (!is_same_page(&ctx->base, ctx->base.pc_next)) {                     
+           ctx->base.is_jmp = DISAS_TOO_MANY;                                  
+       } else {                                                                
+           unsigned page_ofs = ctx->base.pc_next & ~TARGET_PAGE_MASK;          
+           /*
+            *  pc_first pc_next
+            *      |    |
+            *  |   v    v  |           |
+            *  +-----------+-----------+
+            *  |   Page    |   Page    |
+            *
+            *  这里就是pc_next为页尾 - 2Byte的情况，这种情况下，如果pc_next指向
+            *  的指令是一个2B的压缩编码指令，最后这个指令还可以放到当前tb，如果是
+            *  一个4B的普通指令，那么pc_next + len就到了下一个页里，需要结束当前
+            *  tb。
+            *
+            *  对于下个4B编码的指令，下次翻译先取16bit，得到是一个32bit指令后再
+            *  再把后16bit取出来，前端翻译后走到上面第一个分支里，发现已经跨越了
+            *  页边界，于是停止当前tb的翻译，这个tb里只翻译了一个跨越页边界的32bit
+            *  指令。
+            */ 
+           if (page_ofs > TARGET_PAGE_SIZE - MAX_INSN_LEN) {                   
+               uint16_t next_insn = cpu_lduw_code(env, ctx->base.pc_next);     
+               int len = insn_len(next_insn);                                  
+               if (!is_same_page(&ctx->base, ctx->base.pc_next + len)) {       
+                   ctx->base.is_jmp = DISAS_TOO_MANY;                          
+               }                                                               
+           }                                                                   
+       }                                                                       
+    }                                                                           
+```
+
+tb_jmp_cache分析
+-----------------
+ 
+ tb_jmp_cache用va做key是存在问题的，一个系统里可能有相同的va映射到不同的pa，比如，
+ 两个进程的va相同，映射的pa就可能不同。所以，要保证在tb_jmp_cache里，va只唯一映射
+ 一个pa，这个在user mode似乎没有问题，在system mode的完整逻辑还有待分析。(todo)

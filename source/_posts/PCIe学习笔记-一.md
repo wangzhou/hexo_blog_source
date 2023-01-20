@@ -27,6 +27,7 @@ categories:
 
  下面直观的给出PCI(PCIe)硬件和软件的相互对应，也可以看出软件对硬件是怎么做抽象的。
  硬件结构:
+ ```
 		|   root bus: 0   ---->  struct pci_bus
 		|
 	+----------------+        ---->  struct pci_host_bridge
@@ -37,6 +38,7 @@ categories:
 	+----------------+
 	| pcie net cards |        ---->  struct pci_dev
 	+----------------+
+ ```
 
 先从硬件的角度说明PCIe总线系统的工作大致流程。PCIe总线系统是一个局部总线系统，
 目的在于沟通内存和外设的存储空间。总结起来完成: 1. CPU访问外设的存储空间；2.
@@ -53,26 +55,27 @@ BAR, mem base/limit, I/O base/limit. mem base/limit, I/O base/limit指定当前P
 mem空间和I/O空间的起始和大小, 在PCI桥中使用. BAR指示的是PCI设备的mem空间和I/O空间.
 比如, 下图中PCIe net card的BAR空间(BAR指示的一段地址), 就可以存放网卡本身的寄存器.
 一般情况, PCI桥的BAR是用不到的.
-
-		    +----------------+ ----> PCIe host bridge
-		    | pcie root port |
-		    +----------------+ ----> in Soc
-			    |
+```
+                    +----------------+ ----> PCIe host bridge
+                    | pcie root port |
+                    +----------------+ ----> in Soc
+                            |
     --------------------------------------------------- ----> switch
-    |		    +----------------+                |
-    |		    |   pci bridge   |                |
-    |		    +----------------+                |
-    |			    |                         |
+    |                    +----------------+           |
+    |                    |   pci bridge   |           |
+    |                    +----------------+           |
+    |                            |                    |
     |         -------------------------------         |
     |         |                             |         |
-    | +----------------+	   +----------------+ |
-    | |   pci bridge   |	   |   pci bridge   | |
-    | +----------------+	   +----------------+ |
+    | +----------------+           +----------------+ |
+    | |   pci bridge   |           |   pci bridge   | |
+    | +----------------+           +----------------+ |
     ---------------------------------------------------
               |
       +----------------+
       |  PCIe net card |
       +----------------+
+```
 
 整个pci枚举的过程最主要的就是配置pci桥和pci设备的BAR和mem、I/O base/limit
 下面以此为主线分析整个pci枚举的过程。
@@ -84,31 +87,32 @@ mem空间和I/O空间的起始和大小, 在PCI桥中使用. BAR指示的是PCI�
 一般一个pci总线体系中有一个pci host bridge, 这一个pci总线系统也叫一个pci domain,
 各个pci domain不可以直接相互访问。有些时候一个系统会有多个pcie root port, 这时
 每个root port和下面的pci device组成各自的pci domain, 下面介绍各个结构中关键条目。
-
+```
 struct pci_bus:
-	/* 指向该总线上游的pci桥的pci_dev结构 */
-	struct pci_dev	*self;
-	/* 存储该总线的mem、I/O，prefetch mem等资源。由总线上游pci桥的
-	 * pci_dev结构中的resource中的第PCI_BRIDGE_RESOURCES到
-	 * PCI_BRIDGE_RESOURCES + PCI_BRIDGE_RESOURCE_NUM -1个元素复制得到
-	 * 发生于pci_scan_bridge()
-	 *           -->pci_add_new_bus()
-	 *              -->pci_alloc_child_bus()
-	 */
-	struct resource *resource[PCI_BRIDGE_RESOURCE_NUM];
-	struct list_head resources;
+        /* 指向该总线上游的pci桥的pci_dev结构 */
+        struct pci_dev *self;
+        /* 存储该总线的mem、I/O，prefetch mem等资源。由总线上游pci桥的
+         * pci_dev结构中的resource中的第PCI_BRIDGE_RESOURCES到
+         * PCI_BRIDGE_RESOURCES + PCI_BRIDGE_RESOURCE_NUM -1个元素复制得到
+         * 发生于pci_scan_bridge()
+         *           -->pci_add_new_bus()
+         *              -->pci_alloc_child_bus()
+         */
+        struct resource *resource[PCI_BRIDGE_RESOURCE_NUM];
+        struct list_head resources;
 
 struct pci_host_bridge:
-	/* 整个pci系统的mem, I/O资源作为一个个链表元素 */
-	struct list_head windows;
+        /* 整个pci系统的mem, I/O资源作为一个个链表元素 */
+        struct list_head windows;
 
 struct pci_dev:
-	/* 若该设备是pci桥，指向该桥的下游总线 */
-	struct pci_bus	*subordinate;
-	/* 存该pci设备的BAR等资源, 在__pci_read_base()中初始化
-	 * pci_scan_device() 
-	 *    --> pci_setup_device() ...
-	 *        --> __pci_read_base
-	 * still do know where to init resource[PCI_BRIDGE_RESOURCES] ?
-	 */
-	struct resource resource[DEVICE_COUNT_RESOURCE];
+        /* 若该设备是pci桥，指向该桥的下游总线 */
+        struct pci_bus *subordinate;
+        /* 存该pci设备的BAR等资源, 在__pci_read_base()中初始化
+         * pci_scan_device() 
+         *    --> pci_setup_device() ...
+         *        --> __pci_read_base
+         * still do know where to init resource[PCI_BRIDGE_RESOURCES] ?
+         */
+        struct resource resource[DEVICE_COUNT_RESOURCE];
+```
