@@ -9,7 +9,7 @@ date: 2021-07-17 10:47:28
 categories:
 ---
 
-1. ACPI
+ACPI
 -------
 
 For the basic knowledge, you can refer to "PCI Express 体系结构导读" by
@@ -43,7 +43,7 @@ copied from linux/Documentation/acpi/namespace.txt.
                                                     | ACPI Namespace |
                                                     +----------------+
 ```
-2. PCI using ACPI
+PCI using ACPI
 -----------------
 
 a. work flows:

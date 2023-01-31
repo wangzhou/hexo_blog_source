@@ -10,7 +10,7 @@ date: 2021-07-11 23:42:41
 ---
 
 最早的终端是电传打字机输入，纸带输出, 后来发展为键盘输入，显示器输出。终端在
-linux下的文件是/dev/tty*, 虚拟终端/dev/tty1~6。之所以叫虚拟终端是因为/dev/tty1~6
+linux下的文件是/dev/tty*, 虚拟终端/dev/tty1\~6。之所以叫虚拟终端是因为/dev/tty1\~6
 公用一个物理的键盘和显示器。
 
 终端无法输出系统启动的信息，所以需要用控制台输出系统启动信息用来调试系统。
@@ -23,7 +23,7 @@ terminal程序接入的系统的shell所对应的终端是伪终端。从这个�
 通过一个终端接入系统的。在linux下伪终端一般表示为pts*
 
 伪终端主设备和伪终端从设备是伪终端相关的两个重要概念。
-
+```
                        (伪终端主设备)
 telnet client          telnet server-------------+
       |                     |                    |
@@ -32,7 +32,7 @@ networking driver    networking driver           |
 networking card      networking card             |    pts/0(伪终端从设备) pts/1(伪终端从设备) ...
       |                     |
       +-----internet -------+
-
+```
 
 下面是所做的一些测试(ubuntu 14.04)
 
@@ -56,12 +56,12 @@ echo "test" > /dev/tty1
 echo "test1" > /dev/pts/0
 在伪终端上有"test1"输出
 
-
 进程组, 进程组ID, 作业控制，前后台进程都是和进程相关的概念, 用ps命令可以查看这些
 信息
 (ctrl + z 挂起作业中的前台进程组中的所有进程)
 
 -----------
+```
 e.g. ps -alxf (desktop ubuntu 14.04)
 
 PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
@@ -75,9 +75,8 @@ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
 6613  7435  7435  7435 pts/20    7497 Ss    1000   0:00          |   \_ bash
 7435  7497  7497  7435 pts/20    7497 S+       0   0:00          |       \_ sudo grep -r wang
 7497  7498  7497  7435 pts/20    7497 D+       0   0:01          |           \_ grep -r wang
-
+```
 如上图所示, 首先打开了Terminal的程序。Terminal下打开了三个bash, 分别对应三个
 伪终端：pts/0, pts/18, pts/20. 每个bash和它的自进程都在一个session里(SID=session ID).
 每个session里的情况又各有不同，比如，SID=6621 它由两个进程组组成(PGID=6621, 7501),
 而SID=7435的session, 它由两个进程组组成，其中的第二个进程组又有两个进程组成
-

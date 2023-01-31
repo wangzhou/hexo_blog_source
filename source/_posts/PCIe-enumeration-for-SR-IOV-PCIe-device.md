@@ -34,7 +34,7 @@ pci_device_add
                     /* get bar_i size for all vf */
                 --> res->end = res->start + resource_size(res) * total - 1;
 ```
-so at this step, we will see BAR0~BAR5, ROM_BAR, VF_BAR0~VF_BAR5..., the sizes
+so at this step, we will see BAR0\~BAR5, ROM_BAR, VF_BAR0\~VF_BAR5..., the sizes
 of them will be known. VF_BAR0 includes BAR0 in VF1,2,.... the resouces assignment
 below will allocate resources for VF BARs ahead. Here all BAR0 in VF1,2... has
 been seen as one block. you can see pci_enable_sriov below will directly assign

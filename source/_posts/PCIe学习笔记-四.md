@@ -7,7 +7,7 @@ abbrlink: 67860bc5
 date: 2021-07-11 23:49:52
 categories:
 ---
-
+```
 pci_assign_unassigned_bus_resources(b)
 void pci_assign_unassigned_bus_resources(struct pci_bus *bus)
 {
@@ -169,4 +169,4 @@ static void pbus_assign_resources_sorted()
 		   --> pci_update_resource(dev, resno);
 
         --> reassign_resources_sorted(realloc_head, head);
-
+```

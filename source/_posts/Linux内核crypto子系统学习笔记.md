@@ -17,7 +17,6 @@ Analysis will start from crypto test cases in crypto/testmgr.c, e.g. deflate.
 
 crypto API <---> crypto core <---> crypto_register_alg
 
-
 设备驱动通过crypto_register_alg把一个设备支持的算法注册到crypto系统里。
 注册的时候会通过struct crypto_alg把相关的信息传递给crypto core.
 
@@ -147,10 +146,10 @@ crypto_comp_compress(crypto_comp, src, slen, dst, dlen)
 第三，就是释放这个压缩的上下文
 crypto_free_comp(comp)
 
-
 内核虽然现在提供了压缩的异步接口，但是貌似还没有驱动会用到。异步接口的使用要比同步
 接口复杂一点。下面具体看看。
 
+```
 In alg_test_comp, async branch:
 /* 和同步一样，这里也创建一个异步的上下文 */
 acomp = crypto_alloc_acomp(driver, type, mask);

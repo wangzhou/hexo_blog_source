@@ -22,7 +22,7 @@ categories:
 1. 下载自己ubuntu上的ls的源代码:
    which ls 得到ls命令对应的二进制文件的路径: /bin/ls
    dpkg -S /bin/ls 查找是什么deb包包含/bin/ls, 若只用ls会有很多无用的查找结果
-                   该命令的到的结果: coreutils: /bin/ls
+   该命令的到的结果: coreutils: /bin/ls
    sudo apt-get search coreutils 下载coreutils包的源代码
 
 2. sudo apt-get update 更新软件仓库

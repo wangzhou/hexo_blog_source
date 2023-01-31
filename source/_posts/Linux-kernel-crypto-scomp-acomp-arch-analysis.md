@@ -12,7 +12,7 @@ date: 2021-06-28 23:57:46
 categories:
 ---
 
-1. General introduce of linux kernel crypto compression API
+General introduce of linux kernel crypto compression API
 -----------------------------------------------------------
 ```
  crypto_register_alg()
@@ -44,7 +44,7 @@ in kernel use crypto_alloc_comp() to get a compression/decompression context.
 In future, as mentioned in above, all compression/decompression alg should
 register to crypto by scomp/acomp.
 
-2. comp
+comp
 -------
 ```
  crypto_alloc_comp()
@@ -55,7 +55,7 @@ We can use above APIs to do compression/decompress. Crypto subsystem has done
 little about them. So When we add a hardware/software implementation for these
 APIs, there is little limitation about them.
 
-3. Scomp
+Scomp
 --------
 We should use acomp interface to use scomp, they are as below:
 ```
@@ -82,7 +82,7 @@ another scomp job may run in the same cpu core, which will break the data in
 input/output buffer. This means struct scomp_alg's compress/decompress can not
 do scheduling in themselves.
 
-4. Acomp
+Acomp
 --------
 We also use acomp interface to use acomp, they are as above.
 As it is an async interface, the difference from scomp is user can offer a
@@ -91,4 +91,3 @@ compression/decompression is done.
 
 The callback is set by acomp_request_set_callback(), and it will be passed to
 compression/decompression process by struct acomp_req.
-

@@ -11,7 +11,7 @@ date: 2021-07-11 23:34:19
 categories:
 ---
 
-0. preparation
+preparation
 --------------
 
 kernel: https://github.com/hisilicon/kernel-dev.git branch: private-topic-sriov-v3-4.10
@@ -30,7 +30,7 @@ hardware topology:
    |   +-----------+       +------------------+   |
    +---------------+       +----------------------+
 ```
-1. compile kernel and UEFI
+compile kernel and UEFI
 --------------------------
 
 configure kernel: Add SMMU_V3=y, 82599 PF driver = m, 82599 VF driver = m,
@@ -39,7 +39,7 @@ compile kernel image and ko
 compile UEFI using: ./uefi-tools/uefi-build.sh -c ./LinaroPkg/platforms.config d05
 
 
-2. basic test
+basic test
 -------------
 
     1. boot up host OS (firstly update UEFI above)[1]
@@ -103,7 +103,7 @@ compile UEFI using: ./uefi-tools/uefi-build.sh -c ./LinaroPkg/platforms.config d
        
        run ping and iperf to test
 
-3. more scenarios
+more scenarios
 -----------------
 
     1. enable multiple VFs, assigned to one VM
@@ -111,7 +111,7 @@ compile UEFI using: ./uefi-tools/uefi-build.sh -c ./LinaroPkg/platforms.config d
     3. use VF directly
     4. VF and PF communicate
 
-4. performance
+performance
 --------------
     1. should at least reach the performance of PF[3]
 

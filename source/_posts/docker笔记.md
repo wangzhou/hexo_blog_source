@@ -12,7 +12,7 @@ categories:
 docker的三个最基本的概念是镜像(Image)，容器(Container)和仓库(Repository)。本文
 简单介绍有关他们的基础操作。
 
-1. Image
+Image
 --------
 
 Image可以看成是一个配置过的发行版(e.g. 带apach配置的ubuntu发行版)。我们可以自己
@@ -44,7 +44,7 @@ compile/ubuntu/server   14.04               09637d6f7c6f        3 months ago    
 build/ubuntu/server     14.04               ab01bc6b6a57        7 months ago        1.663 GB
 ```
 
-2. container
+container
 ------------
 
 假设我们现在已经有了ubuntu的image，可以运行以下的命令在容器中运行这个镜像。
@@ -63,7 +63,7 @@ then install basic programs: ping, vim, mutt, fetchmail, msmtp, procmail
 要把相关的改动提交，从而形成一个新的docker image, 下次我们在容器里运行这个image,
 就包含了这次提交的信息。具体如下节。
 
-3. build a docker image
+build a docker image
 -----------------------
 ```
 wangzhou@EstBuildSvr1:~$ docker commit -m "Add: basic tools: vim, mutt, fetchmail, procmail, msmtp" -a "Docker basic" 518aa47b44c4 ubuntu/latest
@@ -101,7 +101,7 @@ STATUS一栏显示容器的状态，'Up XXX days'表示这个容器已经运行X
 Exited (0) XXX days ago表示这个容器现在是退出状态。对于退出状态的容器，可以
 docker start -i 容器id重新启动这个容器。对于运行状态的容器，可以docker attach 容器id
 继续接入这个容器, 这时接入这个容器的所有终端将同步显示容器中运行的程序。
-
+```
 /* remove a contrainor */
 sudo docker rm
 /*
@@ -109,8 +109,8 @@ sudo docker rm
  * remove related stopped container
  */
 sudo docker rmi
-
-4. upload a docker image
+```
+upload a docker image
 ------------------------
 
 为了保存，传播image，我们可以把一个docker image上传到DockerHub的仓库。当然首先

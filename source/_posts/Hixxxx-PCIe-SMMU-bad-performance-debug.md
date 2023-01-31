@@ -13,7 +13,7 @@ When we enabled SMMU in Dxx board, we found that the performance of 82599 pluged
 in PCIe slot is very bad. LeiZhen and I spent some to debug this problem. This
 document just shares the related results and information.
 
-1. test scenarios and results
+test scenarios and results
 -----------------------------
 ```
      +----------------+        +---------------+
@@ -37,7 +37,7 @@ document just shares the related results and information.
                  +--+---+
                  | 82599|
                  +------+
-```           
+```
 Hardware topology as showed above. In order to use SMMU to translate data from
 82599 to DDR, we need enable SMMU node in ACPI table.[1]
 
@@ -45,7 +45,7 @@ Then boot up two Dxx boards connected by two 82599 networking cards. When using
 iperf to test the performance between two 82599 networking cards, it is very bad,
 nearly 100Mbps.[2]
 
-2. analysis
+analysis
 -----------
 
 The only difference is disable SMMU and enable SMMU. So the difference is we use
@@ -176,7 +176,7 @@ ftrace to confirm our idea, then use perf to locate the hot point explicitly.
    a lot iova range, then we have to search all iova range allocated before.
 
 
-3. solution
+solution
 -----------
 
 So we can fix this bug like this:
@@ -292,7 +292,7 @@ NOTE: but if this we can not allocate a 64bit iova to a PCIe device's DMA target
       address. This is a problem :(
 
 
-4. problem
+problem
 ----------
 
  * Performance

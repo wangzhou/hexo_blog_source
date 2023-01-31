@@ -12,7 +12,8 @@ date: 2021-07-05 22:43:23
 categories:
 ---
 
-1. IO window parse analysis
+IO window parse analysis
+--------------------------
 
    In an ACPI based system, we parse the IO window configured in DSDT table, as
    showed in this link: blog.csdn.net/scarecrow_byr/article/details/53966460.
@@ -56,7 +57,8 @@ categories:
    is the offset to PCI_IOBASE in CPU VA.
 
 
-2. How to use in PCIe device driver
+How to use in PCIe device driver
+----------------------------------
 
    In one hardware arch, we use inb/outb, inw/outw ... function to access IO
    space. In ARM64, these functions are defined in linux/include/asm-generic/io.h,

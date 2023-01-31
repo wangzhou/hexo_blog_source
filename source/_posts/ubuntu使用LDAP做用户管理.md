@@ -121,6 +121,6 @@ Backup existed LDAP date
 ...
 
 Reference:
-[1] https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-a-basic-ldap-server-on-an-ubuntu-12-04-vps
-[2] https://www.digitalocean.com/community/tutorials/how-to-authenticate-client-computers-using-ldap-on-an-ubuntu-12-04-vps
-[3] http://www.debian-administration.org/article/403/Giving_users_a_home_directory_automatically
+- https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-a-basic-ldap-server-on-an-ubuntu-12-04-vps
+- https://www.digitalocean.com/community/tutorials/how-to-authenticate-client-computers-using-ldap-on-an-ubuntu-12-04-vps
+- http://www.debian-administration.org/article/403/Giving_users_a_home_directory_automatically

@@ -7,6 +7,7 @@ abbrlink: 6d03201d
 date: 2021-07-05 22:37:02
 categories:
 ---
+```
 #include <stdio.h>
 
 int main()
@@ -56,3 +57,4 @@ int main()
 
         return 0;
 }
+```

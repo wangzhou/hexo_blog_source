@@ -24,11 +24,12 @@ categories:
 
 配置与编译
 -----------
-
+```
 Kernel hacking  --->
 [*] Tracers --->
 -*- Tracers
 ...(配置相应的跟踪器)
+```
 
 具体使用
 --------

@@ -41,9 +41,10 @@ System: Linux 157 4.11.0-45.el7.aarch64 aarch64 GNU/Linux
 	export RTE_TARGET=arm64-armv8a-linuxapp-gcc
 	cd examples/helloworld/
 	make
-
+```
 	note: should use "make install T=arm64-armv8a-linuxapp-gcc" in step4
 	      above to avoid compile error in step5.
+```
 
 6. test helloworld in above build:
 

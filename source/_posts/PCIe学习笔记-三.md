@@ -7,12 +7,12 @@ abbrlink: 9dc5e4ca
 date: 2021-07-11 23:56:20
 categories:
 ---
-
+```
 pci_scan_child_bus(b)
-
+```
 这个函数完成pci总线的枚举，完成整个pci树各个总线号的分配。但是并没有分配各个pci桥，
 pci device的BAR和mem, I/O, prefetch mem的base/limit寄存器
-
+```
 unsigned int pci_scan_child_bus(struct pci_bus *bus)
 {
 	unsigned int devfn, pass, max = bus->busn_res.start;
@@ -48,7 +48,8 @@ unsigned int pci_scan_child_bus(struct pci_bus *bus)
 	...
 	return max;
 }
-
+```
+```
 pci_scan_slot(struct pci_bus *bus, int devfn)
     ...
     --> pci_scan_single_device(bus, devfn)
@@ -124,9 +125,10 @@ int pci_setup_device(struct pci_dev *dev)
 		break;
 		...
 	}
-
-/* 直接读硬件配置空间中的interrupt line and pin，然后写到pci_dev->line
- * pci_dev->irq中
+```
+```
+/*
+ * 直接读硬件配置空间中的interrupt line and pin，然后写到pci_dev->line、pci_dev->irq中
  */
 pci_read_irq(dev)
 
@@ -199,11 +201,10 @@ pci_read_bases(dev, 6, PCI_ROM_ADDRESS);
 			--> bus_region.end = window->res->end - window->offset;
 
 	pcibios_resource_to_bus(dev->bus, &inverted_region, res);
-
-
-
+```
 
 现在回到pci_scan_child_bus中的pci_scan_bridge()函数。
+```
 /*
  * 如果一个pci_dev是pci桥的话，以它的上游总线bus和这个设备dev本身为参数，扫描这个
  * 桥。这个函数中实现pci树的递归扫描，在这个函数中为整个pci树上的各个子总线分配
@@ -271,3 +272,4 @@ out:
 	pci_write_config_word(dev, PCI_BRIDGE_CONTROL, bctl);
 
 	return max;
+```

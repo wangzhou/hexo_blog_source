@@ -9,7 +9,7 @@ date: 2021-07-05 22:42:41
 categories:
 ---
 
-1. ATS
+ATS
 ------
 
 ATS is the short of Access Translation Service. In the PCIe spec, the ATS section
@@ -50,7 +50,7 @@ operation from EP will be with a VA, SMMU help to do the translation from VA to
 PA. However, when enabling ATS, PA can be stored in EP ahead, EP can send
 read/write operation with a PA directly, which will improve the performance.
 
-2. Hareware support
+Hareware support
 -------------------
 
  For EP that supports ATS must have ATS Extended Capability in its CFG. In ATS
@@ -93,7 +93,7 @@ read/write operation with a PA directly, which will improve the performance.
 
    SMMU will use command CMD_ATC_INV to invalidate the cached PA in EP.
 
-3. software support
+software support
 -------------------
 
  For analysis will base on [PATCH 0/7] Add PCI ATS support to SMMUv3, we can

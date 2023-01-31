@@ -7,11 +7,12 @@ abbrlink: e336c4e1
 date: 2021-07-11 23:48:15
 categories:
 ---
-
  调用关系：
+```
  pci_scan_root_bus
      --> pci_create_root_bus
-
+```
+```
 /*
  * device说明见下文，bus是根总线号，ops是配置空间读写函数的接口，需要驱动作者
  * 传入回调函数, 会在pci_scan_child_bus->pci_scan_slot->pci_scan_single_device->
@@ -136,5 +137,5 @@ struct pci_bus *pci_create_root_bus(struct device *parent, int bus,
 	return b;
 	...
 }
-
+```
 [1] 关于linux中resource结构对资源的管理可以参看: http://www.linuxidc.com/Linux/2011-09/43708.htm

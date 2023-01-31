@@ -13,7 +13,7 @@ date: 2021-07-11 23:36:35
 categories:
 ---
 
-1. acpi smmu parse
+acpi smmu parse
 ------------------
 ```
 acpi_init
@@ -29,7 +29,7 @@ acpi_init
             /* call functions in section: __iort_acpi_probe_table ~ __iort_acpi_probe_table_end */
         --> acpi_probe_device_table(iort)
 ```
-2. put arm_smmu_init in above section in compile phase
+put arm_smmu_init in above section in compile phase
 ------------------------------------------------------
 ```
 IORT_ACPI_DECLARE(arm_smmu_v3, ACPI_SIG_IORT, acpi_smmu_v3_init);
@@ -40,7 +40,7 @@ arm_smmu_v3_init
          */
     --> platform_driver_register(&arm_smmu_driver)
 ```
-3. PCIe device get its SMMU device
+PCIe device get its SMMU device
 ----------------------------------
 ```
 pci_device_add
