@@ -36,3 +36,8 @@ If you want to copy log in tmux to a file:
 	ctl + b + :
 	save-buffer /path/to/your_file  this copied content in buffer to file,
 	                                in my environment, path should be a full path.
+
+tmux will use .bash_profile by default, so if you want to use the configures in
+.bashrc，you should "source ~/.bashrc" in .bash_profile. One problem I met is tmux
+fails to output colors for some commands such as ls, "source ~/.bashrc" in .bash_profile
+can solve this problem.

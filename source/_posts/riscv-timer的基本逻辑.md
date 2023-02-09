@@ -119,8 +119,9 @@ qemu逻辑 - RDTIME
 Linux内核逻辑
 --------------
 
- 内核timer初始化在：arch/riscv/kernel/time.c, time_init
- 内核相关驱动的位置在：drivers/clocksource/timer-riscv.c
+ 内核timer初始化在：arch/riscv/kernel/time.c的time_init。内核相关驱动的位置在：
+ drivers/clocksource/timer-riscv.c。截止到目前为止，S mode timer的内核patch还在
+ 社区评审，相关的连接在lwn.net/Articles/886863/。
 
  riscv timer的内核驱动把对应的of_device_id静态定义到__timer_of_table段里。time_init
  里的timer_probe会扫描__timer_of_table这个段里timer相关的of_device_id, 然后调用
@@ -133,8 +134,19 @@ Linux内核逻辑
    +-> request_percpu_irq(riscv_clock_event_irq, riscv_timer_interrupt, ...)
 ```
 
- 但是继续看riscv_timer_interrupt的实现, 会发现这个函数会进一步调用clock_event_device
- 里的event_handler回调函数，但是这个回调函数并不是在驱动里直接提供的。
+ riscv timer驱动会注册clocksource和clock_event_device。
+
+ clocksource就是指不断递增的时钟源，比如riscv上的mtime寄存器以一定的频率增加计数，
+ 它就是一个clocksource. riscv_clocksource提供一个read接口，通过这个接口可以得到
+ 当前mtime计数器里的值。在riscv qemu virt平台上这个计数器的频率定义在cpus节点的
+ timebase-frequency字段，它的值是0x989680，就是十进制的10000000，也就是说这个计数
+ 器10ns计数一下。
+
+ clock_event_device指的是可以产生和时钟相关事件的device，比如riscv上当mtime的值
+ 大于等于mtimecmp的值时会上报一个M mode timer的中断，mtime和mtimecmp就可以被看作
+ 一个clock_event_device。riscv timer驱动里定义的struct clock_event_device riscv_clock_event
+ 是个per CPU变量，timer的中断处理函数就是调用riscv_clock_event里的event_handler。
+ 但是这个回调函数并不是在驱动里直接提供的。
 
  event_handler的注册逻辑是通过这个驱动里注册的cpu hotplu回调函数riscv_timer_starting_cpu
  完成的，大概的调用逻辑如下，可以看见event_handler实际上是一个公共函数tick_handle_periodic。
@@ -159,4 +171,6 @@ start_kernel
  tick_handle_periodic就是每次时钟中断时要运行的逻辑，相关逻辑已经和调度有关系，
  在另外讲调度的文章里独立分析吧。
 
- (todo: register clock source and clock event)
+ 实际上，tick_handle_periodic只是在内核开始的时候用，内核随后会把event_handler切
+ 到高精度定时器的回调函数上hrtimer_interrupt，这个函数里只是处理时间相关的东西，
+ tick时发生的调度要回到entry.S里，也就是处理完timer中断再处理调度相关的逻辑。

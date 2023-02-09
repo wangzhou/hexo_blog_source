@@ -5,7 +5,8 @@ tags:
   - dts
 description: >-
   本文分析riscv的dts描述格式，分析用的是riscv qemu virt平台，我们将分析不同
-  启动参数下生成的dts格式。依赖的qemu版本是v7.1.50。
+  启动参数下生成的dts格式，重点分析CPU、中断控制器以及PCIe控制器的相关定义。
+  依赖的qemu版本是v7.1.50，依赖的内核版本是v6.1。
 abbrlink: 65257
 date: 2023-02-06 19:16:02
 categories:
@@ -69,17 +70,36 @@ CPU相关dts节点
  CPU和numa相关的信息描述在cpu-map里，一个cluster表示一个numa节点，相关的CPU core
  写到cluster里。
 
- 相关的内核代码分析(todo): (mem/numa结构的解析也在这里?)
+ 相关的内核代码分析:
 ```
  start_kernel
        /* arch/riscv/kernel/setup.c */
    +-> setup_arch
-         /* 展开dtb的入口? */
-     +-> unflatten_device_tree
-         /* 解析riscv.isa字符串 */
-     +-> riscv_fill_hwcap
+   | +-> parse_dtb
+   | | +-> early_init_dt_scan
+   | |       /*
+   | |        * dts中memory节点的解析和添加memblock，这里会去掉0x80000000-0x80200000
+   | |        * 这段BIOS占用的内存。
+   | |        */
+   | |   +-> early_init_dt_scan_memory
+   | |     +-> early_init_dt_add_memory_arch
+   | |       +-> memblock_add
+   | |
+   | |   /* 展开dtb的入口? */
+   | +-> unflatten_device_tree
+   | |   /* 解析riscv.isa字符串 */
+   | +-> riscv_fill_hwcap
+   |   /*
+   |    * riscv上在arch/riscv/kernel/smpboot.c, 这里是CPU的numa拓扑的解析代码的
+   |    * 入口。
+   |    *
+   |    * 如何和内核numa相关结构建立上联系？
+   |    */
+   +-> smp_prepare_boot_cpu
+     +-> init_cpu_topology
+       +-> parse_dt_topology
 ```
-
+ 
  plic内核代码分析可以参考这里[这里](https://wangzhou.github.io/riscv-plic基本逻辑分析/)。
 
 中断相关dts节点
@@ -126,7 +146,8 @@ plic@c600000 {
                                0x02 0x09>;
 ```
  可以看见interrupts-extended完整描述了plic的输出和CPU的关系，包括M mode和S mode
- 的外部中断。plic和CPU的逻辑关系可以参考[这里](https://wangzhou.github.io/riscv-plic基本逻辑分析/)。
+ 的外部中断。这种情况的最大问题是, 在numa系统里会有多个plic，一个numa节点上的plic
+ 只能连接本numa节点上的CPU。plic和CPU的逻辑关系可以参考[这里](https://wangzhou.github.io/riscv-plic基本逻辑分析/)。
 
  如下是只有aplic的dts节点，这里只写了numa0上的节点：
 ```
@@ -244,7 +265,9 @@ imsics@24000000 {
 timer相关dts节点
 -----------------
 
- 每个numa节点一个mtimer。stimer怎么描述？
+ 每个numa节点一个mtimer。stimer只是增加了相关的CSR寄存器，并没有抽象出一个timer
+ 设备，所以dts并没有stimer的节点。其实，从下面的内核代码可以看出，内核是不需要这
+ 里mtimer的节点信息的(todo: 原因分析)。
 ```
 mtimer@2000000 {                                                
         numa-node-id = <0x00>;                                  
@@ -306,4 +329,5 @@ pci@30000000 {
         #address-cells = <0x03>;                                
 };                                                              
 ```
- 是PCIe控制器INTx中断的配置，ranges是MEM/IO窗口的配置，reg是ECAM空间的配置。
+ interrupt-map/interrupt-map-map是PCIe控制器INTx中断的配置，ranges是MEM/IO窗口的
+ 配置，reg是ECAM空间的配置。
