@@ -3,7 +3,9 @@ title: qemu tcg访存指令模拟
 abbrlink: 19272
 date: 2022-07-25 15:45:10
 tags: [QEMU, 内存管理]
-description: "本文分析qemu tcg里关于load/store的流程，以riscv平台为分析对象。qemu的版本是5.1.50。"
+description: "本文分析qemu tcg里关于load/store的流程，以riscv平台为分析对象。qemu的版本是5.1.50。
+      CPU访存主要有使用load/store的显示访存也有隐式访存，比如CPU取指令就属于一种
+      隐式访存，qemu对CPU取指令的模拟逻辑可以参考: htts://wangzhou.github.io/qemu-tcg取指令逻辑分析/"
 categories:
 ---
 

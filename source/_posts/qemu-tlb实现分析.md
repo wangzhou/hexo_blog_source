@@ -1,0 +1,119 @@
+---
+title: qemu tlb实现分析
+tags:
+  - QEMU
+description: '本文分析qemu tcg里tlb实现的逻辑，分析基于的qemu版本是v7.1.50, 基于riscv构架。'
+abbrlink: 48711
+date: 2023-02-18 22:06:45
+categories:
+---
+
+TLB相关数据结构
+----------------
+
+ 每个vCPU都有一个TLB相关的数据结构，riscv上这个结构在RISCVCPU neg域段的CPUTLB tlb结构里。
+
+```
+typedef struct CPUTLB {
+    CPUTLBCommon c;
+    CPUTLBDesc d[NB_MMU_MODES];
+    CPUTLBDescFast f[NB_MMU_MODES];
+} CPUTLB;
+```
+ 如上是CPUTLB的结构，CPUTLBCommon存放TLB的公有信息，目前是dirty标记、锁和一些统计
+ 变量，CPUTLBDescFast和CPUTLBDesc存放的都是TLB的内容，两者组成一个两级TLB，其中
+ CPUTLBDescFast是第一级，CPUTLBDesc是第二级，搜索的时候会先查第一级然后查第二级。
+
+ NB_MMU_MODES表示TLB的种类，目前riscv上的定义是这样的：
+```
+  U mode 0b000                                                              
+  S mode 0b001                                                              
+  M mode 0b011                                                              
+  U mode HLV/HLVX/HSV 0b100                                                 
+  S mode HLV/HLVX/HSV 0b101                                                 
+  M mode HLV/HLVX/HSV 0b111                                                 
+```
+
+ 每个MMU mode下的CPUTLBDesc和CPUTLBDescFast都有若干个TLB entry组成的TLB表, 相关
+ 的TLB表的大小是可以动态调整的。其中一个TLB entry的定义是：
+```
+typedef struct CPUTLBEntry {
+    union {
+        struct {
+            target_ulong addr_read;
+            target_ulong addr_write;
+            target_ulong addr_code;
+            uintptr_t addend;
+        };
+        uint8_t dummy[1 << CPU_TLB_ENTRY_BITS];
+    };
+} CPUTLBEntry;
+```
+ TLB entry对读、写以及代码是分开做缓存的。
+
+ qemu里的TLB模拟并不是对真实硬件的模拟，而是针对所有构架做的一个通用的TLB实现，
+ 它的目的是加速地址翻译。
+
+基本逻辑
+---------
+
+ TLB的作用是加速地址访问时的地址翻译，地址访问一般分为显示地址访问和隐式地址访问，
+ 显示访问就是通过显示的load/store指令完成地址访问，隐式的访问是CPU在运行时不通过
+ 访存指令做的内存访问，比如访问页表以及取指令。不考虑虚拟化时，页表放在物理地址上，
+ 所以，我们这里先只考虑load/store以及取指令中涉及的TLB逻辑。
+
+ TLB无效化是TLB相关的重要操作，一般也是软件和TLB打交道的唯一接口，有专门的TLB无效
+ 化指令触发相关的逻辑。当虚拟地址到物理地址的映射改变时，就需要做TLB的无效化操作，
+ 相关指令可以有不同的参数，定义TLB无效化的范围。
+
+ qemu取指令的基本逻辑可以参考[这里](https://wangzhou.github.io/qemu-tcg取指令逻辑分析/)。qemu load/store的基本逻辑可以参考[这里](https://wangzhou.github.io/qemu-tcg访存指令模拟/)。
+
+代码分析
+---------
+
+ TLB创建的相关代码分析：
+```
+ /* 对于取指令和load/store操作都是在page walk成功后创建对应的TLB */
+ riscv_cpu_tlb_fill
+   +-> tlb_set_page
+     [...]
+       +-> tlb_set_page_full
+             /*
+              * 如果页属性是可写，会在TLB上打一个还没有写过的标记。因为代码页面
+              * 的权限在创建的时候一般不会有可写，所以，这里TLB_MOTDIRTY这个标记
+              * 针对的是数据相关的可写页面。
+              */
+         +-> write_address |= TLB_MOTDIRTY;
+```
+ (todo: 补充大页和iommu的逻辑)
+
+创建tb时也会配置代码所在page对应TLB的TLB_MOTDIRTY标记，这里TLB_MOTDIRTY是专门针对
+指令页面的。
+```
+ cpu_exec
+   +-> tb_gen_code
+     +-> tb_link_page
+       +-> tb_page_add
+         +-> tlb_protect_code
+           [...]
+           +-> tlb_reset_dirty
+                 /* 这里会把两级TLB里的TLB_MOTDIRTY都配置上 */
+             +-> tlb_reset_dirty_range_locked
+```
+ 
+ 数据的load/store访问，总是要进过TLB的，相关的逻辑可以参考[这里](https://wangzhou.github.io/qemu-tcg访存指令模拟/)，当TLB的
+ flag区域里有标记时会强制进入load/store的慢速路径，在慢速路径里处理各种TLB flag，
+ 慢速路径里有专门对TLB_MOTDIRTY的处理，所以，对于代码页面，当程序把页面改成可写，
+ 然后改动代码，继续执行改动过的代码，就会出问题，因为guest代码可能已经被翻译到tb里，
+ guest代码被改动后，曾经翻译得到tb就应该被删掉，如果这个tb在chain tb的链条里，同时
+ 应该从tb链条里把这个tb删除。相关的代码分析如下：(todo: 其它TLB flag处理)
+```
+ load_helper
+   +-> todo
+```
+ 但是，指令的访问不一定每次都要经过TLB，可以说大部分不经过TLB，因为翻译过成的TB
+ 块是可以chain在一起的，这样整个执行的过程可能全部在TB链条里跳来跳去。因为qemu约束
+ chain tb只能在一个page内，所以tb在一个page内跳来跳去是安全的。当guest的执行逻辑
+ 进入一个新page时，取指令的时候，必然要做TLB相关的操作。
+ 
+ (todo: 补充tlb无效化的逻辑)
