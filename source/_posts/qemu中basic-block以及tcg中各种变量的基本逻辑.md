@@ -47,6 +47,22 @@ categories:
  这里的decr就要是一个local temporary，因为这个变量在brcon_i32的前后都要使用，已经
  跨越了两个BB，这里的decr换成temporary变量就会出错。
 
+ global变量又分为寄存器和memory两类。memory一般定义的是CPU里的寄存器，比如riscv
+ 里是这样定义pc寄存器：
+```
+ cpu_pc = tcg_global_mem_new(cpu_env, offsetof(CPURISCVState, pc), "pc");    
+```
+ 这种TCGv在后端翻译时，会把guest CPU寄存器的值先load到host寄存器里，计算完后再store
+ 回guest CPU结构体里，模拟过程会有访存行为。
+
+ 寄存器这种TCGv在后端翻译时，会直接映射到host的寄存器上，每次就可以直接访问，一般
+ 用来存放guest CPU env的指针，比如riscv上env变量是这么定义的：
+```
+ /* tcg/tcg.c */
+ tcg_context_init(unsigned max_cpus)                                 
+   +-> tcg_global_reg_new_internal(s, TCG_TYPE_PTR, TCG_AREG0, "env");        
+```
+
 QEMU代码分析
 ------------
 

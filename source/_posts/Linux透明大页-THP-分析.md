@@ -8,7 +8,7 @@ abbrlink: 7bfba555
 date: 2021-06-19 10:05:48
 ---
 
-0. THP是什么
+THP是什么
 ------------
 
  Linux有两种使用大页的方式，一种是普通大页，另一种是透明大页。本文说的就是透明
@@ -21,7 +21,7 @@ linux/Documentation/vm/transhuge.rst
 linux/Documentation/admin-guide/mm/transhuge.rst
 ```
 
-1. THP的使用方式
+THP的使用方式
 ----------------
 
  上面的内核文档已经详细介绍了THP的使用方式。简单总结，就是sysfs中提供了三大类
@@ -64,7 +64,7 @@ linux/Documentation/admin-guide/mm/transhuge.rst
  defrag: madvise的时候，vma merge还是会把大于2MB的vma扔给khugepaged线程去扫描、
  然后触发huge page collapse。
 
-2. THP内核代码分析
+THP内核代码分析
 ------------------
 
  透明巨页的内核配置是CONFIG_TRANSPARENT_HUGEPAGE，代码主要在mm/khugepages.c，

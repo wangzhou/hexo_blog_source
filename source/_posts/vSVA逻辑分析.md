@@ -9,7 +9,7 @@ abbrlink: '22133167'
 date: 2021-06-21 13:07:11
 ---
 
-0. qemu基础认识
+qemu基础认识
 ---------------
 
  qemu里linux系统的用户态代码跑在cpu EL0, qemu里linux系统的内核态代码跑在cpu EL1。
@@ -27,7 +27,7 @@ date: 2021-06-21 13:07:11
  网络IO，那qemu可以直接起socket，把报文发出去。注意，这里的虚拟机退出是指CPU不再
  运行虚拟机里执行的代码，因为CPU并不知道如果控制IO。
 
-1. vSVA
+vSVA
 -------
 
  vSVA的目标是在虚拟机里(qemu)，使的IO设备可以直接使用进程VA。所以，我们这里的
@@ -52,7 +52,7 @@ date: 2021-06-21 13:07:11
  在guest里多进程使用一个设备的资源，就需要支持PASID。这里的逻辑和上面的是一样的，
  只不过扩展到多进程。
 
-2. 软件框架
+软件框架
 -----------
 ```
       +----------------------+
@@ -116,7 +116,7 @@ date: 2021-06-21 13:07:11
  host SMMU上相关进程页表和tlb。Eric补丁里vfio里提供了ioctl(VFIO_IOMMU_CACHE_INVALIDATE)
  用来更新host SMMU上的相关tlb。这里vcpu可以做带VMID/ASID的DVM, 直接无效化相关的tlb。
  
-3. virtio iommu
+virtio iommu
 ---------------
 
  以上的分析都是基于nested IOMMU/SMMU的方案。目前Jean在做virtio iommu的方案。

@@ -44,13 +44,13 @@ CPU core和MMU是绑在一起的，而IOMMU和外设是独立的两个设备, IO
 
 下面来一一介绍下上面的内容。
 
-1. SMMU的固件描述和Linux解析
+SMMU的固件描述和Linux解析
 ----------------------------
   
   参考[2][3], ACPI(先不关注DT里的描述方法)在IORT表格里描述SMMU和系统里其他部件
   的关系。
 
-2. SMMU功能简介
+SMMU功能简介
 ---------------
 
   SMMU为外设提供和地址翻译相关的诸多功能。硬件上, SMMU用三个队列和两个表格支持
@@ -124,7 +124,7 @@ trasaction with va |
   的命令，比如用于继续stall请求的RESUME命令；prefetch命令；SYNC命令。
   
 
-3. SMMU驱动分析
+SMMU驱动分析
 ---------------
 
   SMMUv3相关的驱动的文件包括arm-smmu-v3.c, io-pgtable-arm.c,
@@ -266,7 +266,7 @@ trasaction with va |
 	attach_dev这个回调。在vfio里会使用到iommu_attach_group, iommu_attach_device,
 	vfio会用UNMANAGED domain。(具体逻辑： todo)
 
-4. IOMMU接口分析
+IOMMU接口分析
 ----------------
 
   DMA接口和IOMMU的关系在上面已给出。
@@ -278,16 +278,16 @@ trasaction with va |
 
   VFIO重度使用IOMMU接口, 从这个角度看IOMMU子系统的对外接口参见[6]
 
-5. SMMU虚拟化分析
+SMMU虚拟化分析
 -----------------
 
   Nested SMMU的分析参见[4]。
 
 Reference
 
-[1] http://blog.csdn.net/scarecrow_byr/article/details/53844162
-[2] https://blog.csdn.net/scarecrow_byr/article/details/52348234
-[3] https://blog.csdn.net/scarecrow_byr/article/details/53844162
-[4] https://blog.csdn.net/scarecrow_byr/article/details/104606571
-[5] https://blog.csdn.net/scarecrow_byr/article/details/100983619
-[6] https://blog.csdn.net/scarecrow_byr/article/details/51494401
+[1] https://wangzhou.github.io/PCI-SMMU-parse-in-ACPI/
+[2] https://wangzhou.github.io/PCI-ACPI笔记2/
+[3] https://wangzhou.github.io/PCI-SMMU-parse-in-ACPI/
+[4] https://wangzhou.github.io/vSVA逻辑分析/
+[5] https://wangzhou.github.io/Linux-SVA特性分析/
+[6] https://wangzhou.github.io/Linux-vfio-driver-arch-analysis/
