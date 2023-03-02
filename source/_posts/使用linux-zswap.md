@@ -56,8 +56,8 @@ zswap是Linux内核里压缩swap内存的一个特性，他可以把需要swap�
    运行上面的命令后，查看/sys/kernel/debug/zswap/stored_pages，可以发现其值变
    为非0。
 
-7. 以上的环境可以建在虚拟机里。可以基于这里的设置：
-   https://blog.csdn.net/scarecrow_byr/article/details/86438011
+7. 以上的环境可以建在虚拟机里。可以基于[这里](https://wangzhou.github.io/Guest-and-host-communication-for-QEMU/)的方法设置：
+
    在host上使用 qemu-img create disk.img 1G 生成一个1G大小的虚拟磁盘。再在qemu
    启动命令行里加上 -hdb path_of_disk/disk.img 把这个磁盘加给虚拟机。
    再在虚拟机里配置以上各个步骤即可。如果需要调试带硬件加速的zswap，可以把硬件

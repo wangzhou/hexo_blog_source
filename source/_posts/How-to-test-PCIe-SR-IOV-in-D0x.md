@@ -123,6 +123,6 @@ reference:
     provide address isolation just like ACS does.
     we will upstream in ACS quirk patch to fix this.
 [2] how to compile qemu locally in D05:
-    http://blog.csdn.net/scarecrow_byr/article/details/51494020
+    https://wangzhou.github.io/ARM64-qemu-native-build/
 [3] should add 82599 patch to test, firstly make sure performance of 82599 PF is
     good.

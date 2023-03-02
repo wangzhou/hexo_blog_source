@@ -129,8 +129,7 @@ date: 2021-06-27 18:08:06
    软件使用command queue下发相应的命令操作硬件。
 
    PCI设备和平台设备的硬件缺页流程有一些差异，下面分别介绍。对于PCI设备，ATS, 
-   PRI和PASID的概念同时存在于PCIe和SMMU规范中。对于ATS的介绍可以参考这里:
-   https://blog.csdn.net/scarecrow_byr/article/details/74276940。简单讲，ATS特性
+   PRI和PASID的概念同时存在于PCIe和SMMU规范中。ATS的介绍可以参考[这里](https://wangzhou.github.io/PCIe-ATS协议分析/)简单讲，ATS特性
    由设备侧的ATC和SMMU侧的ATS同时支持，其目的是在设备中缓存va对应的pa，设备随后
    使用pa做内存访问时无需经过SMMU页表转换，可以提高性能。PRI(page request
    interface)也是需要设备和SMMU一起工作，PCIe设备可以发出缺页请求，SMMU硬件在解
@@ -384,4 +383,4 @@ date: 2021-06-27 18:08:06
 虚拟化
 ------------
 
- https://blog.csdn.net/scarecrow_byr/article/details/104606571
+ SVA虚拟化的基本逻辑可以参考[这里](https://wangzhou.github.io/vSVA逻辑分析/)。

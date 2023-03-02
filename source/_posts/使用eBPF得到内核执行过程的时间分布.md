@@ -9,7 +9,7 @@ abbrlink: 12b4e640
 date: 2021-06-18 23:53:18
 ---
 
-0. 具体例子介绍
+具体例子介绍
 ---------------
 
  在SVA的使用场景中，IO缺页比较影响系统的性能。为此，我们需要观测在一个段程序执行
@@ -26,7 +26,7 @@ date: 2021-06-18 23:53:18
  库(e.g. <https://github.com/iovisor/bcc.git>)，方便在用户态编写代码，记录和处理
  得到的信息。
 
-1. 内核配置
+内核配置
 -----------
  
  我们使用<https://github.com/Linaro/linux-kernel-uadk> branch: uacce-devel-5.11
@@ -53,7 +53,7 @@ date: 2021-06-18 23:53:18
  CONFIG_CGROUP_FREEZER=y
  (以上是ebpf相关的)
 
-2. 用户态环境搭建
+用户态环境搭建
 -----------------
 
  本文测试所使用的环境是Ubuntu 16.04, 这个版本的ubuntu没有bcc相关的仓库，外部仓库
@@ -92,7 +92,7 @@ export LD_LIBRARY_PATH
 	ln -s <your kernel source> /lib/modules/<your_kernel_magic>/build
 ```
 
-3. 代码示例
+代码示例
 -----------
 内核补丁:
 ```
@@ -162,8 +162,7 @@ index e9b648407102..4d96bfd20726 100644
 
 ```
 如上，为了在eBPF的跟踪代码里跟踪io page fault的流程，我们在SMMU io page fault
-的入口和出口出增加了新的tracepoint点。增加trancepoint的方法还可以参考这里：
-<https://blog.csdn.net/scarecrow_byr/article/details/111243450>
+的入口和出口出增加了新的tracepoint点。增加trancepoint的方法还可以参考[这里](https://wangzhou.github.io/使用perf-trace跟踪IO缺页/)。
 
 用户态python脚本, ebpf_smmu_iopf.py。可以参考bcc里自带的tools, 看看怎么写这些
 脚本: <https://github.com/iovisor/bcc.git>
@@ -250,7 +249,7 @@ while (1):
                 exit()
 ```
 
-4. 运行效果
+运行效果
 -----------
 ```
  sudo ./ebpf_smmu_iopf.py

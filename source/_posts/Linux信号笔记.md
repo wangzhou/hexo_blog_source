@@ -47,7 +47,6 @@ https://www.ibm.com/developerworks/cn/linux/l-cn-signalsec/index.html.
 构建的方案，每个部分是自己可以控制的。但是，当你的方案要嵌入到更高一层的方案里
 时, 用一个线程单独处理信号会带来非常多的麻烦。
 
-内核驱动可以使用fasync发信号给一个fd绑定的进程。具体参考:
-https://blog.csdn.net/scarecrow_byr/article/details/89766391
+内核驱动可以使用fasync发信号给一个fd绑定的进程。具体可以参考[这里](https://wangzhou.github.io/Linux异步通知/)。
 以上内核向用户态进程发信号需要用户态先执行fd和进程绑定的fcntl操作。实际上内核
 可以直接类似send_sig_info的函数给一个PID发信号。

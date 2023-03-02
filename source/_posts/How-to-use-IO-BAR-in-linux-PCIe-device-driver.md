@@ -16,7 +16,7 @@ IO window parse analysis
 --------------------------
 
    In an ACPI based system, we parse the IO window configured in DSDT table, as
-   showed in this link: blog.csdn.net/scarecrow_byr/article/details/53966460.
+   showed in this [link](https://wangzhou.github.io/PCI-parse-MEM-IO-range-in-CRS-in-ACPI-table/).
 
    We can see in pci_acpi_root_prepare_resources:
 ```

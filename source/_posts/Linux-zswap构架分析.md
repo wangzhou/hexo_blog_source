@@ -5,8 +5,7 @@ tags:
   - zswap
 description: >-
   本文简单分析zswap的软件构架，为在zswap框架中添加crypto acomp的支持做准备。 关于zswap的基本介绍和使用可以参考:
-  https://blog.csdn.net/scarecrow_byr/article/details/103463101.
-  本文的分析基于Linux主线5.5-rc1. 
+  https://wangzhou.github.io/使用linux-zswap/。本文的分析基于Linux主线5.5-rc1。
 abbrlink: 3bd4e7ca
 date: 2021-06-27 18:02:12
 ---

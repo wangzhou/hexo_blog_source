@@ -270,7 +270,7 @@ acpi_init
             --> acpi_bus_attach(device)
 
             ...     /* why we call acpi_pci_root_add, please refer to
-                     * http://blog.csdn.net/scarecrow_byr/article/details/42619749
+                     * https://wangzhou.github.io/PCI-ACPI笔记1/
                      * scan PCI info in DSDT
                      */
 	        --> acpi_pci_root_add
@@ -283,9 +283,9 @@ acpi_init
 
 reference
 ---------
-[1]. [RFC PATCH v3 0/3] Add ACPI support for HiSilicon PCIe Host Controllers
-[2]. https://github.com/open-estuary/uefi.git/OpenPlatformPkg/Chips/Hisilicon/Pv660/Pv660AcpiTables/
-[3]. "ACPI & PCI 学习笔记" in this blog
-[4]. PCI Firmware Specification 3.0
-[5]. ACPI 6.0 spec
-[6]. IORT spec
+- [RFC PATCH v3 0/3] Add ACPI support for HiSilicon PCIe Host Controllers
+- https://github.com/open-estuary/uefi.git/OpenPlatformPkg/Chips/Hisilicon/Pv660/Pv660AcpiTables/
+- https://wangzhou.github.io/PCI-ACPI笔记1/
+- PCI Firmware Specification 3.0
+- ACPI 6.0 spec
+- IORT spec
