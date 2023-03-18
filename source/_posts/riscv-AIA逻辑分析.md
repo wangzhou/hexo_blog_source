@@ -7,7 +7,7 @@ tags:
   - 中断
 description: >-
   本文分析riscv AIA的基本逻辑。目前，相关的代码还在社区review，分析使用的代码为，
-  qemu使用v7.1.50主线代码，kvmtool使用https://github.com/avpatel/kvmtool riscvv_aia_v1分支，
+  qemu使用v7.1.50主线代码，kvmtool使用https://github.com/avpatel/kvmtool riscv_aia_v1分支，
   内核使用https://github.com/avpatel/linux riscv_kvm_aia_v1分支。
 abbrlink: 5284
 date: 2022-12-05 22:30:28

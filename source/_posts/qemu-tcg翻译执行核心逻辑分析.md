@@ -36,7 +36,7 @@ categories:
 
  整个翻译的逻辑都在tb_gen_code里。
 
- 要理解具体的翻译执行的细节需要，需要了解整个机器是怎么起来的。qemu启动的时候时候，
+ 要理解具体的翻译执行的细节，需要了解整个机器是怎么起来的。qemu启动的时候时候，
  会在如下的流程里初始化所谓accelerator的东西，qemu把tcg和kvm看成是qemu翻译执行的
  两种加速器，如下就是相关初始化的配置，我们这里只关心tcg。
 ```
@@ -47,47 +47,61 @@ categories:
          +-> accel_init_machine(accel, current_machine)
                /*
                 * tcg的init_machine定义在accel/tcg/tcg-all.c, tcg_accel会被qemu
-                * 定义成一个类对象。tcg init_machine的回调函数是tcg_init
+                * 定义成一个类对象。tcg init_machine的回调函数是tcg_init_machine
                 */
-           +-> acc->init_machine (tcg_init)
-             +-> tcg_exec_init
+           +-> acc->init_machine (tcg_init_machine)
+             +-> tcg_init
+             | +-> tcg_context_init
+             |       /*
+             |        * tcg/aarch64/tcg-target.c.inc，这个函数配置翻译时用到的host
+             |        * 寄存器的信息，tcg_target_call_clobber_regs表示需要调用者
+             |        * 保存的寄存器，这个函数把x19-x29(ARM64中需要被调用者保存)
+             |        * 从这个集合中去除，reserved_regs表示有固定用途的寄存器，qemu
+             |        * 后端翻译分配寄存器时，不能从其中分配，ARM64作为后端时，这样
+             |        * 的寄存器有：sp/fp(x29)/tmp(x30)/x18/vec_tmp。
+             |        *
+             |        * tcg_target_call_iarg_regs/tcg_target_call_iarg_regs表示ARM64
+             |        * host架构上函数入参和返回值可以用的寄存器，ARM64上直接静态
+             |        * 定义到了tcg-target.c.inc中。
+             |        */
+             |   +-> tcg_target_init
+             |     /*
+             |      * tcg_ctx是TCGContext, 线程变量，是tb翻译执行的上下文. 每个
+             |      * tb里都有一个段前导代码，这个代码用来在真正执行tb里的host
+             |      * 指令的时候，做环境的准备。下面这个函数生成这段前导的指令。
+             |      * 从下面可见tb的结尾时的代码也在这里生成了，前后都在准备和
+             |      * 恢复执行tb的这个host函数的上下文，中间的br是跳掉tb的业务
+             |      * 逻辑里执行业务代码。
+             |      */
+             +-> tcg_prologue_init(tcg_ctx)
+                   /* 我们这里假设host是arm64，tcg/aarch64/tcg-target.c.inc */
+               +-> tcg_target_qemu_prologue
                    /*
-                    * tcg_ctx是TCGContext, 线程变量，是tb翻译执行的上下文. 每个
-                    * tb里都有一个断前导代码，这个代码用来在真正执行tb里的host
-                    * 指令的时候，做环境的准备。下面这个函数生成这段前导的指令。
-                    * 从下面可见tb的结尾时的代码也在这里生成了，前后都在准备和
-                    * 恢复执行tb的这个host函数的上下文，中间的br是跳掉tb的业务
-                    * 逻辑里执行业务代码。
+                    * 如上的这个函数里，用代码生成了一段arm64的汇编，大概是：
+                    * (这个可以-d out_asm，通过输出host的反汇编得到)
+                    *  stp      x29, x30, [sp, #-0x60]!
+                    *  mov      x29, sp
+                    *  stp      x19, x20, [sp, #0x10]
+                    *  stp      x21, x22, [sp, #0x20]
+                    *  stp      x23, x24, [sp, #0x30]
+                    *  stp      x25, x26, [sp, #0x40]
+                    *  stp      x27, x28, [sp, #0x50]
+                    *  sub      sp, sp, #0x480
+                    *  mov      x19, x0        <------ 第一个入参保存cpu结构体地址
+                    *  br       x1             <------ 第二个入参保存的是生成指令地址
+                    *  movz     w0, #0         <------ 这个地址保存到TCGContext的code_gen_epilogue
+                    *  add      sp, sp, #0x480
+                    *  ldp      x19, x20, [sp, #0x10]
+                    *  ldp      x21, x22, [sp, #0x20]
+                    *  ldp      x23, x24, [sp, #0x30]
+                    *  ldp      x25, x26, [sp, #0x40]
+                    *  ldp      x27, x28, [sp, #0x50]
+                    *  ldp      x29, x30, [sp], #0x60
+                    *  ret      
+                    *
+                    *  这些生成的指令被放到TCGContext的code_ptr, code_gen_prologue
+                    *  也指向相同的一片buf。
                     */
-               +-> tcg_prologue_init(tcg_ctx)
-                     /* 我们这里假设host是arm64，tcg/aarch64/tcg-target.c.inc */
-                 +-> tcg_target_qemu_prologue
-                     /*
-                      * 如上的这个函数里，用代码生成了一段arm64的汇编，大概是：
-                      * (这个可以-d out_asm，通过输出host的反汇编得到)
-                      *  stp      x29, x30, [sp, #-0x60]!
-                      *  mov      x29, sp
-                      *  stp      x19, x20, [sp, #0x10]
-                      *  stp      x21, x22, [sp, #0x20]
-                      *  stp      x23, x24, [sp, #0x30]
-                      *  stp      x25, x26, [sp, #0x40]
-                      *  stp      x27, x28, [sp, #0x50]
-                      *  sub      sp, sp, #0x480
-                      *  mov      x19, x0        <------ 第一个入参保存cpu结构体地址
-                      *  br       x1             <------ 第二个入参保存的是生成指令地址
-                      *  movz     w0, #0         <------ 这个地址保存到TCGContext的code_gen_epilogue
-                      *  add      sp, sp, #0x480
-                      *  ldp      x19, x20, [sp, #0x10]
-                      *  ldp      x21, x22, [sp, #0x20]
-                      *  ldp      x23, x24, [sp, #0x30]
-                      *  ldp      x25, x26, [sp, #0x40]
-                      *  ldp      x27, x28, [sp, #0x50]
-                      *  ldp      x29, x30, [sp], #0x60
-                      *  ret      
-                      *
-                      *  这些生成的指令被放到TCGContext的code_ptr, code_gen_prologue
-                      *  也指向相同的一片buf。
-                      */
 ```
  
  各个CPU线程的初始化流程是：
@@ -213,17 +227,16 @@ categories:
  函数的定义；2. 在target/riscv/helper.h增加对应的宏，宏的参数分别是：helper函数名字、
  函数的返回值、函数的入参；3. 在中间码里用gen_helper_xxx直接调用helper函数，返回值
  保存在gen_helper_xxx的第一个参数里，常数入参需要用tcg_const_i32/i64生成下常数TCGv，
- 实际上是为这个常数分配中间码存储空间(todo)。
+ 实际上是为这个常数分配TCG寄存器存储空间。
 
  helper函数的实现逻辑是生成函数调用的上下文，然后跳转到函数的地址执行指令，也就是
  先把函数的入参放到寄存器上，然后调用跳转指令跳到函数地址执行。
-
 
 后端翻译
 --------
 
  后端翻译在tcg_gen_code里，核心是在一个循环里处理前端翻译的中间码，把中间码翻译成
- host上的汇编。
+ host上的汇编，具体分析可以参考[这里](https://wangzhou.github.io/qemu-tcg中间码优化和后端翻译/)。
 
 执行
 ----

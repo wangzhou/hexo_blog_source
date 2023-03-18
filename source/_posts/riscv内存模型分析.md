@@ -12,7 +12,6 @@ date: 2023-02-25 17:43:09
 categories:
 ---
 
-
 基本逻辑
 ---------
 
@@ -57,8 +56,8 @@ riscv内存序规则
 ```
  访存地址有重合的情况，第一条规则是说后面的store不能跑到前面的指令之前执行。
 
- 第二条规则就比较绕了，直接翻译是，a和b是load操作，x是a和b读到的值，a和b之间没有
- store修改x内存里的值，a和b load的值会被不同的内存写操作改变。这一条规则进一步的
+ 第二条规则就比较绕了，直接翻译是，a和b是load操作，x是a和b要读的数据，a和b之间没有
+ store修改x(在内存)的值，a和b load的值之前被不同的内存写操作修改。这一条规则进一步的
  解释是，两个load读同一个地址上值，新的load不能读到旧load读到的值，但是，还有进一步
  考虑两种情况，第一种是a和b之间有store修改x的值，这种情况下a和b不保序，第二种情况
  是，a和b读到的值是被不同写内存操作修改的值，这种情况a和b也不保序。
@@ -67,7 +66,12 @@ riscv内存序规则
 
  注意，根据如上的定义，当a是一个普通的store，b是一个load，他们访问相同地址，load
  是可以跑到store之前的，不过load到的值是store缓存在store buff里的值，这个就是Intel
- TSO内存序上唯一放松的内存序。(todo: 待确定)
+ TSO内存序上唯一放松的内存序。
+
+ 再次总结下，load/store的四种可能情况是：1. load-load, 2, load-store, 3, store-store,
+ 4. store-load。规则1说的是2/3两种情况不能乱序，规则2说的是1的情况，规则3只说了
+ AMO/SC-load的情况，不能乱序，所以普通store-load的情况是可以乱序的，这种情况就是
+ 我们上面提到了TSO内存序上唯一的一个放松约束。
 
 ```
 • Explicit Synchronization 
@@ -97,8 +101,29 @@ riscv内存序规则
   +------| load/store  |         v
          +-------------+          
 ```
+ riscv上acquire/release的作为AMO或者lr/sc指令的属性一起使用，ARM64上则有STLR/LDAR
+ 指令，这两条指令把acquire/release和普通load/store指令结合到了一起。
+
+ 如下图所示，如果要确保地址无关的两个store不乱序，可以在其中加一个写fence，但是
+ 这样会一把拦住fence前后的所有store，当把后一个store换成带release的store时(STLR)，
+ store和STLR保序的同时，STLR后面其它的地址无关的store/load也可以提前投机执行。
+```
+         +-------------+                            +-------------+          
+         |    store    |---------+           ^      |    store    |---------+
+         +-------------+         |           |      +-------------+         |
+                                 v           |                              |
+------------- fence -------------+--       --+---------- STLR --------------+--
+  ^                                          |                              
+  |      +-------------+                     |      +------------------+
+  +------|    store    |                     +------| other store/load |         
+         +-------------+                            +------------------+
+```
+
  第七条规则中的RCsc指的是Release Consistency with sequentially-consistent synchronization
- operation。(todo: 引用了一篇经典的论文?)
+ operation，对应的概念还有RCpc，这两者是acquire/release的两种分类，描述的是，比如
+ 上图中如果“other store/load“里如果有LDAR，那么这个LDAR是否可以和STLR乱序，如果
+ acquire/release的种类是RCsc，那么不能乱序，如果是RCpc，是可以乱序的。riscv的WMO
+ 中的acquire/release的种类是RCsc。
 
  第八条规则说的a和b是一个pair，是说lr/sc指令组成的pair。
 
