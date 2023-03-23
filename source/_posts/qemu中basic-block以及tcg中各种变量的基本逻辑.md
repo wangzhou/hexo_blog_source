@@ -66,4 +66,4 @@ categories:
 QEMU代码分析
 ------------
 
- (todo)
+ 代码分析需要涉及tcg后端翻译，具体代码分析可以参考[这里](https://wangzhou.github.io/qemu-tcg中间码优化和后端翻译/)。

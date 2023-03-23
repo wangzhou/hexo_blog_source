@@ -18,7 +18,7 @@ categories:
  的难度，比如，要模拟一个新构架的CPU，只要实现guest->IR这一步就好，后续在X86或者在
  ARM64的host的机器上跑，重新编译下qemu就好，并不用去熟悉host CPU的构架。
 
- guest翻译成IR的逻辑在[这里]([https://wangzhou.github.io/qemu-tcg翻译执行核心逻辑分析/)已经有介绍，这一步主要靠程序员手写代码生成IR，本文主
+ guest翻译成IR的逻辑在[这里](https://wangzhou.github.io/qemu-tcg翻译执行核心逻辑分析/)已经有介绍，这一步主要靠程序员手写代码生成IR，本文主
  要讲中间码的优化和后端翻译，我们可以认为这两部分属于翻译IR到host指令，为了看清楚
  IR到host指令的翻译，我们首先要明确前端翻译得到的IR是怎么样的。
 
