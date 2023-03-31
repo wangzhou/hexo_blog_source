@@ -1,0 +1,312 @@
+---
+title: 如何使用meson构建程序
+tags:
+  - meson
+  - 编译链接
+description: >-
+  本文是使用meson构建程序的一个笔记，现在很多程序都是使用meson构建的，比如qemu、
+  glib库等，了解下meson的基本逻辑在使用用meson构建的程序时逻辑会更加清晰。 本文中的测试程序运行环境是ARM版本的ubuntu
+  20.04，示例使用的glib的版本是2.76.1。
+abbrlink: 60794
+date: 2023-03-31 14:47:57
+categories:
+---
+
+
+基本逻辑
+---------
+
+meson是用python写的一个程序构建工具，meson的官网在[这里](https://mesonbuild.com/index.html)，这里有meson的使用手册，
+这个手册很好用。meson和make一样，需要写描述文件告诉meson要构建什么，这个描述文件
+就是meson.build，meson根据meson.build中的定义生成具体的构建定义文件build.ninja，
+ninja根据build.ninja完成具体构建。所以，不像make直接根据Makefile文件完成构建，meson
+需要和ninja配合一起完成构建。
+
+我们通过一个简单程序具体看下使用meson的方法，具体使用meson还是要学习下如上官网上
+的手册。
+
+首先在源码根目录下创建meson.build文件，文件内容：
+```
+project('learn_meson', 'c')
+executable('hello', 'test.c')
+```
+这个文件定义了一个learn_meson的工程，并且定义了hello这个构建目标，以及test.c构建
+使用的源文件。
+
+在需要构建的源码根目录运行：
+```
+ meson setup builddir
+```
+这个是告诉meson在哪个目录下构建(这里是源码根目录下的builddir目录)，meson一定要在
+一个和源码独立的目录里做构建，这样多次构建可以指定不同的构建目录和构建配置，相互
+之间不受影响，比如对于同样的程序，构建一个riscv版本可以这样指定构建目录：
+```
+ meson setup --cross-file ./rv_cross_file rv_builddir
+```
+其中，rv_cross_file是指定一些构建要用的参数，当然你的系统里要有riscv的工具链。
+rv_cross_file内容如下：
+```
+[host_machine]
+system = 'linux'
+cpu_family = 'riscv64'
+cpu = 'riscv64'
+endian = 'little'
+
+[properties]
+c_args = []
+c_link_args = []
+
+[binaries]
+c = 'riscv64-linux-gnu-gcc'
+cpp = 'riscv64-linux-gnu-g++'
+ar = 'riscv64-linux-gnu-ar'
+ld = 'riscv64-linux-gnu-ld'
+objcopy = 'riscv64-linux-gnu-objcopy'
+strip = 'riscv64-linux-gnu-strip'
+```
+
+运行如上命令后可以在源码根目录下发现对应的构建目录，里面有build.ninja文件。
+```
+sherlock@m1:~/tests/meson_test/build$ ls
+build.ninja  compile_commands.json  hello.p  meson-info  meson-logs  meson-private
+```
+
+在源码根目录运行meson compile -C builddir，在builddir目录下即可以看到编译好的hello，
+可以看到编译好的hello是动态链接的。进入builddir，运行meson configure可以看到default_library
+一项是shared，meson configure显示构建的配置，默认为动态链接，可以使用如下命令修改
+为静态链接：(注意，要在builddir下运行)
+```
+meson configure -Ddefault_library=static
+```
+再次meson compile -C builddir即可只构建出静态链接的程序。
+
+一个例子：编译glib
+--------------------
+
+如下的方式可以本地编译glib:
+```
+ cd glib_source_dir
+ meson setup build
+ meson compile -C build
+```
+
+如果要静态编译可以：
+```
+ cd build
+ meson configure -Ddefault_library=static
+ cd ../
+ meson compile -C build
+```
+
+glib库会编译出libglib/libgio/libgmodule，如果想只编译libglib，直观的办法是可以修改
+meson.build文件，我们可以把相关的模块这样注释掉，这样就可以只编译libglib：
+```
+diff --git a/meson.build b/meson.build                                          
+index 0cbc9689f..f5acd5f61 100644                                               
+--- a/meson.build                                                               
++++ b/meson.build                                                               
+@@ -82,9 +82,9 @@ darwin_versions = [current + 1, '@0@.@1@'.format(current + 1, interface_age)]
+                                                                                
+ configinc = include_directories('.')                                           
+ glibinc = include_directories('glib')                                          
+-gobjectinc = include_directories('gobject')                                    
+-gmoduleinc = include_directories('gmodule')                                    
+-gioinc = include_directories('gio')                                            
++# gobjectinc = include_directories('gobject')                                  
++# gmoduleinc = include_directories('gmodule')                                  
++# gioinc = include_directories('gio')                                          
+
+@@ -2387,11 +2387,11 @@ pkg = import('pkgconfig')                               
+ windows = import('windows')                                                    
+ subdir('tools')                                                                
+ subdir('glib')                                                                 
+-subdir('gobject')                                                              
+-subdir('gthread')                                                              
+-subdir('gmodule')                                                              
+-subdir('gio')                                                                  
+-subdir('fuzzing')                                                              
++# subdir('gobject')                                                            
++# subdir('gthread')                                                            
++# subdir('gmodule')                                                            
++# subdir('gio')                                                                
++# subdir('fuzzing')                                                            
+```
+
+我们考虑交叉编译出riscv版本的libglib，使用如上交叉编译的方法会在setup过程中会自动
+下载libffi，考虑到libglib并没有依赖libffi，我们直接把meson.build中的libffi依赖描述
+这一行注释掉：
+```
+[...]
+libm = cc.find_library('m', required : false)                                   
+# libffi_dep = dependency('libffi', version : '>= 3.0.0')  <--- 注释掉这行
+                                                                                
+libz_dep = dependency('zlib')                                                   
+[...]
+```
+这样最后可以只编译出riscv版本的libglib。
+
+meson具体特性介绍
+------------------
+
+如上meson的官网有详细介绍meson的各种特性，我们这边持续的总结下，总结的思路是用类比
+的方式看看make上的特性在meson上是怎么样，然后我们看meson特有的特性。
+
+- target和构建文件
+
+首先meson一定要像make一样，有描述构建target和构建依赖的语法，有自己的数据结构的
+定义、函数方法的定义。上面用executable()定义编译的目标文件，如果目标是要构建库出来，
+可以用library()，比如glib里定义libglib这个target是这样搞的：
+```
+libglib = library('glib-2.0',                                                   
+  glib_dtrace_obj, glib_dtrace_hdr,                                             
+  sources : [deprecated_sources, glib_sources],                                 
+  version : library_version,                                                    
+  soversion : soversion,                                                        
+  darwin_versions : darwin_versions,                                            
+  install : true,                                                               
+  # intl.lib is not compatible with SAFESEH                                     
+  link_args : [noseh_link_args, glib_link_flags, win32_ldflags],                
+  include_directories : configinc,                                              
+  link_with: [charset_lib, gnulib_lib],                                         
+  dependencies : [                                                              
+    gnulib_libm_dependency,                                                     
+    libiconv,                                                                   
+    libintl_deps,                                                               
+    libm,                                                                       
+    librt,                                                                      
+    libsysprof_capture_dep,                                                     
+    pcre2,                                                                      
+    platform_deps,                                                              
+    thread_dep,                                                                 
+  ],                                                                            
+  c_args : glib_c_args,                                                         
+  objc_args : glib_c_args,                                                      
+  gnu_symbol_visibility : 'hidden',                                             
+)                                                                               
+```
+其中各个域段的语法要查meson library这个函数的具体定义，其中的dependencies域段表示
+目标的依赖，而dependencies中的语段，比如，thread_dep，又是通过dependency生成的:
+```
+thread_dep = dependency('threads')                                            
+```
+如上使用dependency定义的是公共的库，比如上面定义的是一个对libthreads库的依赖，自
+定义的依赖要用declare_dependency，比如，glib里定义了subproject，pcre库作为其中的
+一个subproject，glib在构建的时候，如果在subproject下面没有找见pcre库，就会根据相关
+定义(pcre.wrap)去下载pcre的代码，然后一起编译，所以glib的meson配置里也要定义glib
+对subproject里的pcre的依赖，这个定义就使用了declare_dependency:
+```
+/* glib/subprojects/pcre2-10.42/meson.build */
+pcre2_8_lib = library(                                                          
+  'pcre2-8',                                                                    
+  sources,                                                                      
+  include_directories: includes,                                                
+  c_args: [config_h_defs, '-DHAVE_CONFIG_H', '-DPCRE2_CODE_UNIT_WIDTH=8'],      
+  version: pcre2_8_lib_version,                                                 
+  install: true,                                                                
+)                                                                               
+                                                                                
+libpcre2_8 = declare_dependency(                                                
+  link_with: pcre2_8_lib,                                                       
+  include_directories: includes,                                                
+  compile_args: static_defs,                                                    
+)                                                                               
+```
+这里定义了pcre2-8这个target，又生成一个libpcre2_8的依赖供glib使用，glib顶层memson.build
+里又用dependency定义了下libpcre2_8得到pcre2，最终在libglib的target定义里引用到了
+pcre2。
+
+那么有了target，怎么定义和target相关的构建文件，比如，libglib依赖一些库，但是他
+本身也有一堆.o要编译出来，这个怎么去表述。相关源文件在sources域段描述，这个是一个
+列表，可以把需要编译的文件都加进来。
+
+- 和python很像的语法
+
+如上可以看出来meson的语法和python的很像，这可能和meson是用python写的有关系。看meson.build
+文件的时候，直接可以套用python的基本数据的定义，比如，列表、元组、字典、函数、模块。
+
+- compiler property/检测系统信息
+
+在传统的Linux configure中会生成一些函数，并在配置阶段编译运行，以此来检测系统的
+基础配置。meson的compiler properties特性支持做相关的系统检测，基本做法是先用
+compiler = meson.get_compiler()拿到所使用编译器的对象，然后就可以调用编译器对象的
+各种方法做检测，可以检测的项目包括对特定代码的编译、链接、运行、头文件以及函数是否
+存在等等，meson网站的Compiler properties章节有详细的介绍。
+
+这里看一个glib里的具体例子：
+```
+cc = meson.get_compiler('c')
+[...]
+uint128_t_src = '''int main() {
+static __uint128_t v1 = 100;
+static __uint128_t v2 = 10;
+static __uint128_t u;
+u = v1 / v2;
+}'''
+if cc.compiles(uint128_t_src, name : '__uint128_t available')
+  glib_conf.set('HAVE_UINT128_T', 1)
+endif
+```
+这些先定义了一段要编译的代码，用uint128_t_src表示，然后用cc.compiles去编译，如果
+可以编译成功就会执行下面的configure语句把这个信息先记录下来，后面会把这些信息写
+入到meson生成的config文件(config.h)里，一般在config文件里用宏去定义一个个的配置
+信息，在源码文件中include相关的config头文件使用这些配置信息。
+
+- subproject/wrap
+
+在上文中已经提到过subproject，这里我们进一步看下subproject是怎么定义的，subproject
+被定义在subproject目录下的wrap描述文件里，我们还是以pcre为例子，对应的wrap文件是
+这样的：
+```
+/* glib/subproject/pcre2.wrap */
+[wrap-file]
+directory = pcre2-10.42
+source_url = https://github.com/PhilipHazel/pcre2/releases/download/pcre2-10.42/pcre2-10.42.tar.bz2
+source_filename = pcre2-10.42.tar.bz2
+source_hash = 8d36cd8cb6ea2a4c2bb358ff6411b0c788633a2a45dabbf1aeb4b701d1b5e840
+patch_filename = pcre2_10.42-2_patch.zip
+patch_url = https://wrapdb.mesonbuild.com/v2/pcre2_10.42-2/get_patch
+patch_hash = 350dc342b81a1611af43e5cc23f1b10453c7df51d5bb60ab9ee247daf03802bc
+wrapdb_version = 10.42-2
+
+[provide]
+libpcre2-8 = libpcre2_8
+libpcre2-16 = libpcre2_16
+libpcre2-32 = libpcre2_32
+libpcre2-posix = libpcre2_posix
+```
+如上pcre的wrap文件中，source_url是pcre库下载的地址，这里是直接下载的发布版本，meson
+也支持不同的配置格式，比如使用git直接git clone源代码，这个使用需要用[wrap-git]定义。
+patch_url不是我们直观想到的给基础的pcre新增的path，而是meson的配置文件，对于不是
+使用meson构建的软件(比如这里的pcre)，meson维护了一个叫wrapdb的配置库，从这里可以
+下载对应的meson配置文件，patch_url就是对应的meson配置文件的链接。如果需要给基础库
+打业务相关的patch，这个需要定义到diff_files域段。
+
+- 生成代码/configuration
+
+上面已经提到menson会生成配置文件，这里进一步看下相关的语法，meson说明文档里的configuration
+章节有详细的介绍。如下是glib里的一个例子：
+```
+glib_conf = configuration_data()
+[...]
+glib_conf.set('HAVE_UINT128_T', 1)
+[...]
+configure_file(output : 'config.h', configuration : glib_conf)
+```
+先用configuration_data创建一个配置收集的对象glib_conf，然后不断的调用set方法把相关
+的配置放到glib_conf，最后使用configuration_file把收集到的配置写入config.h文件，比如
+config.h文件里就会写入如下的配置：
+```
+#define HAVE_UINT128_T 1
+```
+
+- option
+
+meson还提供了一个叫meson_options.txt(1.1之后的版本改成meson.option)的配置文件，用来
+定义一些用户可以动态配置的组件，这个特性最常用的就是定义一些可选的feature，可以把
+相关feature的value域段配置成disable，从而禁止这个feature。
+
+- 调试技巧: 修改build.ninja
+
+meson setup会首先在build目录下生成build.ninja，随后ninja再根据这个文件做构建，所以
+可以修改这个文件，不去构建某些target，最直观的修改方法就是从target列表里去掉不想
+构建的target。
