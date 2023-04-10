@@ -60,7 +60,7 @@ categories:
              |        * 后端翻译分配寄存器时，不能从其中分配，ARM64作为后端时，这样
              |        * 的寄存器有：sp/fp(x29)/tmp(x30)/x18/vec_tmp。
              |        *
-             |        * tcg_target_call_iarg_regs/tcg_target_call_iarg_regs表示ARM64
+             |        * tcg_target_call_iarg_regs/tcg_target_call_oarg_regs表示ARM64
              |        * host架构上函数入参和返回值可以用的寄存器，ARM64上直接静态
              |        * 定义到了tcg-target.c.inc中。
              |        */
