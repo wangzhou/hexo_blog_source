@@ -532,11 +532,11 @@ ENDPROC(ret_from_kernel_thread)
  * arguments are passed to schedule_tail.
  */
 /*
- * n: 哪里调用的？__switch_to这个函数的第一个入参是前task_struct, 后一个是要
- * switch到的线程的task_struct。task_struct里有一个架构相关的结构thread_struct。
- * riscv的定义在arch/riscv/include/asm/processor.h, TASK_THREAD_RA是这个结构在
- * task_struct里的偏移，所以a3、a4得到thread_struct在切出、切入线程task_struct里
- * thread_struct的地址。
+ * n: sched/core.c里的context_switch会调用到这里。__switch_to这个函数的第一个入参
+ * 是前task_struct, 后一个是要switch到的线程的task_struct。task_struct里有一个架
+ * 构相关的结构thread_struct。riscv的定义在arch/riscv/include/asm/processor.h, 
+ * TASK_THREAD_RA是这个结构在task_struct里的偏移，所以a3、a4得到thread_struct在
+ * 切出、切入线程task_struct里thread_struct的地址。
  * 
  */
 ENTRY(__switch_to)
@@ -544,7 +544,7 @@ ENTRY(__switch_to)
 	li    a4,  TASK_THREAD_RA
 	add   a3, a0, a4
 	add   a4, a1, a4
-	/* n: 保存这些就够了？*/
+	/* n: 保存这些就够了，剩下的是caller save寄存器，已经保存到对应的栈了 */
 	REG_S ra,  TASK_THREAD_RA_RA(a3)
 	REG_S sp,  TASK_THREAD_SP_RA(a3)
 	REG_S s0,  TASK_THREAD_S0_RA(a3)
