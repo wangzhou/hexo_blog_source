@@ -1,0 +1,162 @@
+---
+title: qemu tcg后端翻译基本模型
+tags:
+  - QEMU
+description: >-
+  之前写了一个《qemu tcg中间码优化和后端翻译》的分析文章，这个文章涉及的细节 太多，本篇想要描述的是一个东西，但是我们不提代码，着重分析qemu
+  tcg后端翻译 的基本模型。分析中的guest构架使用riscv，host构架使用arm64。
+abbrlink: 63236
+date: 2023-04-23 13:08:54
+categories:
+---
+
+qemu后端翻译干的是件什么事
+---------------------------
+
+qemu用tcg模拟guest指令执行，qemu把guest指令先翻译成中间码，然后再把中间码翻译成
+host指令，host指令可以最终在host cpu上执行，这样就完成了翻译。
+
+本文我们关注的是后端翻译模型，也就是中间码翻译成host指令的过程。中间码是一套完整
+的指令集定义，使用中间码可以完整的表述guest指令的行为，看一个小例子对这种描述会
+又更直观的感受。
+```
+ addi            sp,sp,-32                  <-- guest汇编
+ sd              s0,24(sp)
+
+ add_i64 x2/sp,x2/sp,$0xffffffffffffffe0    <-- 中间码
+ add_i64 tmp4,x2/sp,$0x18
+ qemu_st_i64 x8/s0,tmp4,leq,0
+```
+我们看如上guest那条store指令，它被翻译成了两条中间码，第一条add_i64是用来计算sd
+要store的地址，计算出的地址保存在tmp4这个虚拟寄存器里，第二条中间码把s0的值store
+到tmp4描述的内存上，qemu用中间码和虚拟寄存器完整的表述guest的逻辑。这里qemu_st_i64
+这个中间码表示一个store操作，store的数据和地址都用虚拟寄存器描述，所以在qemu_st_i64
+之前要用add_i64先计算出store的地址，并保存在虚拟寄存器里。
+
+qemu中，其它的guest指令也是这样先翻译成中间码和虚拟寄存器的表示，后端翻译基于中间
+码和虚拟寄存器进行。上面的中间码表述中，x2/sp和x8/s0还是guest上寄存器的名字，但是
+逻辑上guest上的寄存器都已经映射到qemu虚拟寄存器，所以中间码指令中的所有寄存器都是
+qemu的虚拟寄存器。
+
+现在假设我们已经得到一串中间码，我们再翻过头来看看要怎么完成模拟。qemu模拟的guest
+cpu系统说到底就是host内存里表示的guest cpu的软件结构体的状态以及guest内存的状态，
+qemu中间码已经完整的描述了guest状态改变的激励，拿上面addi和sd guest指令的模拟为例，
+模拟addi的中间码是addi_64 x2/sp,x2/sp,$0xffffffffffffffe0，表示要把guest的sp加上
+-32，sd的中间码表示要把guest sp + 24指向的地址上的值改成s0的值。我们拿到如上中间码
+或者guest指令，甚至可以直接写c代码去完成模拟。qemu为了追求效率把中间码翻译成host
+指令来完成模拟。
+
+我们把上面的几条中间码写在一起：
+```
+ add_i64 x2/sp,x2/sp,$0xffffffffffffffe0
+ add_i64 tmp4,x2/sp,$0x18
+ qemu_st_i64 x8/s0,tmp4,leq,0
+```
+这几条中间码只是表意，实际真正更新guest cpu的数据结构和guest地址还需要host指令完成，
+所以实际翻译后的host指令可能是这样的：
+```
+ ldr      x20, [x19, #0x10]    把guest cpu中的sp load到host的x20寄存器
+ sub      x20, x20, #0x20      使用host sub指令完成guest sp的计算
+ str      x20, [x19, #0x10]    更新guest cpu中sp的值
+ add      x21, x20, #0x18      使用host add指令计算store的地址，并保存到host的x21寄存器
+ ldr      x22, [x19, #0x40]    把guest cpu中的s0 load到host的x22寄存器
+ str      x22, [x21, xzr]      使用host str指令更新guest地址上的值
+```
+qemu的后端翻译就是完成如上功能，总结起来就是：1. 分配host物理寄存器；2. 生成host
+指令；3. host和guest之间的状态同步。
+
+分配host物理寄存器
+-------------------
+
+先看下分配host物理寄存器会遇到什么问题。首先，虚拟寄存器和host物理寄存器是两个独
+立的概念，虚拟寄存器可能会很多，而物理寄存器的个数是有限的，虚拟寄存器有自己的生
+命周期，虚拟寄存器生命周期结束后，它所使用的物理寄存器就可以给其它虚拟寄存器使用。
+因为host物理寄存器数目有限，就有可能出现host物理寄存器不够分的情况，这时候就需要
+把已经分配但是目前还没有用到的host物理寄存器的值保存到内存，这样就可以腾出host物
+理寄存器来使用。
+
+qemu在处理host物理寄存器分配的时候，分了两步处理，第一步先确定虚拟寄存器的生命周
+期，一般叫做寄存器活性分析，第二步根据虚拟寄存器活性分析的结果具体分配物理寄存器。
+
+针对一段中间码，qemu对其做逆序遍历，依此确定虚拟寄存器的生命周期。如果一个虚拟寄
+存器后续还中间码使用，那它还是live的，如果后面没有中间码用了，它就dead了。
+
+所以，一个虚拟寄存器dead与否是和具体中间码一起看的，一个虚拟寄存器可能在前几个中
+间码中是live的(虽然这几个中间码并没有使用这个虚拟寄存器)，最后一个使用它的中间码
+后这个虚拟寄存器就dead了。qemu里只要记录虚拟寄存器被引用时的状态就好。
+
+我们随便截取一段中间码看下，每条中间码后面数字表示出哪个虚拟寄存器dead了，其中0、
+1、2等等表示这条中间码的第0个第1个第2个虚拟寄存器dead了。
+```
+ add_i64 x2/sp,x2/sp,$0xffffffffffffffe0  sync: 0  dead: 1 2  pref=0x3ff80000
+ add_i64 tmp4,x2/sp,$0x18                 pref=0xffffffff
+ qemu_st_i64 x8/s0,tmp4,leq,0             dead: 0 1
+ add_i64 x8/s0,x2/sp,$0x20                sync: 0  pref=0x3ff80000
+ mov_i64 x15/a5,$0x1                      sync: 0  dead: 0  pref=0xffffffff   <- 8
+ add_i64 tmp4,x8/s0,$0xffffffffffffffe4   pref=0xffffffff
+ qemu_st_i64 $0x1,tmp4,leul,0             dead: 0 1
+ mov_i64 x15/a5,$0x2                      sync: 0  dead: 0  pref=0xffffffff   <- 7
+ add_i64 tmp4,x8/s0,$0xffffffffffffffe8   pref=0xffffffff
+ qemu_st_i64 $0x2,tmp4,leul,0             dead: 0 1
+ add_i64 tmp4,x8/s0,$0xffffffffffffffec   pref=0xffffffff
+ qemu_st_i64 $0x0,tmp4,leul,0             dead: 0 1
+ add_i64 tmp4,x8/s0,$0xffffffffffffffe4   dead: 2  pref=0xffffffff
+ qemu_ld_i64 x14/a4,tmp4,lesl,0           sync: 0  dead: 1  pref=0x3ff80000
+ add_i64 tmp4,x8/s0,$0xffffffffffffffe8   dead: 2  pref=0xffffffff
+ qemu_ld_i64 x15/a5,tmp4,lesl,0           dead: 1  pref=0xffffffff            <- 6 ---
+ add_i64 tmp4,x15/a5,x14/a4               dead: 1 2  pref=0xffffffff          <- 5
+ ext32s_i64 x15/a5,tmp4                   sync: 0  dead: 1  pref=0xffffffff   <- 4 ---
+ add_i64 tmp4,x8/s0,$0xffffffffffffffec   pref=0xffffffff
+ qemu_st_i64 x15/a5,tmp4,leul,0           dead: 0 1                           <- 3
+ add_i64 tmp4,x8/s0,$0xffffffffffffffec   dead: 1 2  pref=0xffffffff
+ qemu_ld_i64 x15/a5,tmp4,lesl,0           sync: 0  dead: 1  pref=0xffffffff   <- 2 ---
+ mov_i64 x10/a0,x15/a5                    sync: 0  dead: 0 1  pref=0xffffffff <- 1
+```
+我们拿x15寄存器为例，逆序遍历的时，位置1的中间码中的x15(下面叫p1的x15)后面没有中
+间码用了，所以p1的x15是dead。p2的x15因为在p1要用，所以p2的x15是live。p3的x15是dead，
+因为p2直接直接更新了x15，就是p3以下没有中间码使用p3的x15。p4的x15是live，因为p3
+要使用p4的x15。p5的x15是dead，因为p4刷新了x15的值，p5以下没有中间码引用p5的x15。
+p6/p7/p8的x15同样分析。
+
+qemu在寄存器活性分析阶段，把每个中间码里的虚拟寄存器的活性做好标记，依次存到每个
+中间码的life域段。然后再顺序遍历每个中间码分配物理寄存器。还是用上面这段中间码举
+例，比如为p8的x15分配了host物理寄存器x20，因为p8的x15是dead，那么host这个x20寄存
+器就可以在p8这条中间码后继续参与host物理寄存器分配，但是对于p4的x15，比如给p4的
+x15分配了host物理寄存器x21，这个x21就必须一直被占用着，因为p3要用p4的x15，p3之后
+x15 dead，对应的物理寄存器x21就可以再次参与host物理寄存器分配。
+
+生成host指令以及状态同步
+------------------------
+
+我们把状态同步和host指令生成放到一起看，因为所谓状态同步也要生成host指令进行。
+
+对于中间码的输入虚拟寄存器，需要先判断这个输入寄存器的值是保存在内存上，还是已经
+保存在host物理寄存器上了，如果还在内存上，qemu就要分配host物理寄存器，然后插入host
+上的load指令把内存上的值load到host物理寄存器上，如果虚拟寄存器的值已经在host物理
+寄存器上，那么它直接就可以参与计算。对于中间码的输出虚拟寄存器，qemu需要为它分配
+host物理寄存器。
+
+中间码的输入和输出寄存器都有着落了，qemu就可以尝试把中间码翻译成host指令。这个翻
+译可能直接就可以翻译成一条host指令，也可能需要再插入几条host指令调整下。
+
+guest指令对应的中间码执行完后，需要把guest指令的输出同步回guest CPU数据结构，所以
+qemu在这里还需要插入host store指令把数据刷回guest CPU。qemu在寄存器活性分析的时候
+会把需要做同步的虚拟寄存器打上sync的标记，生成host指令的时候遇见sync标记就可以直接
+插入host指令做同步。
+
+并不需要每个guest指令执行完都要把信息刷回guest CPU数据结构，虽然guest CPU的信息
+是定义在guest CPU数据结构中的，但是我们是模拟guest CPU，只要不破坏模拟的逻辑，host
+物理寄存器上的值就可以先不刷回guest CPU数据结构。那什么时候需要刷回guest CPU，整个
+TB执行完时，虚拟寄存器需要被同步回guest CPU，当中间码可能导致guest CPU异常时，需要
+做同步，因为触发异常后，guest CPU跳转到异常处理地址，并且向软件报告异常处理的上下
+文，其中guest CPU的通用寄存器就都是从guest CPU数据结构获取。
+
+加入BB的概念
+-------------
+
+上面讲的寄存器分配和状态同步其实还不完整，如上的中间码里是没有跳转的(br/brcond)，
+qemu的一个翻译块(TB)里是可以存在跳转中间码的，在有跳转中间码的情况下，上面逆序遍
+历确定虚拟寄存器活性的办法就会有问题。为此qemu中在TB的基础上又引入了Basic Block(BB)
+的概念，简单讲在一个BB内中间码都是顺序执行的，这样如上的逻辑在BB内还是成立的。所以，
+在BB的结尾就要dead全部虚拟寄存器，并且把guest CPU对应的虚拟寄存器向guest CPU数据
+结构做同步。
