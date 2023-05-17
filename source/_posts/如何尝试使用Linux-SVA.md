@@ -8,7 +8,7 @@ abbrlink: 5cae2bae
 date: 2021-06-21 13:05:38
 ---
 
-1. 硬件确认
+ 硬件确认
 -----------
 
  首先你要有一台KunPeng920服务器，而且这台服务器上的压缩解压缩设备是可见的。你可以
@@ -28,7 +28,7 @@ root@ubuntu:~# dmesg | grep iommu
 ```
  如上，可以认为SMMU的配置没有问题，当然group的编号可以是不同的。
 
-2. 内核配置和编译
+内核配置和编译
 -----------------
 
  目前内核的相关补丁还没有完全上主线，我们在Linaro的github上维护了一个完整的可以
@@ -48,7 +48,7 @@ root@ubuntu:~# dmesg | grep iommu
  
  然后编译内核即可。
 
-3. 用户态代码配置和编译
+用户态代码配置和编译
 -----------------------
 
  对应的用户态代码的仓库也在Linaro的github上：https://github.com/Linaro/warpdrive/tree/master
@@ -69,7 +69,7 @@ libhisi_qm.so  libwd_ciper.so  libwd_comp.so  libwd_digest.so  libwd.so
  如上的两个测试app基于压缩解压缩设备，所以依赖的库是：
  libhisi_qm.so libwd_comp.so libwd.so
 
-4. 运行测试用例
+运行测试用例
 ---------------
 
  使用如上编译好的内核Image启动系统, 把libhisi_qm.so libwd_comp.so libwd.so

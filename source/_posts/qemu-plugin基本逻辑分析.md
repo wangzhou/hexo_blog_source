@@ -1,0 +1,364 @@
+---
+title: qemu plugin基本逻辑分析
+tags:
+  - QEMU
+description: >-
+  本文分析qemu plugin的实现机制，了解qemu plugin的机制后，我们可以很容易的写 一个plugin出来，用qemu
+  plugin的方式为qemu增加新的功能。分析基于的qemu版本是 v7.1.50。
+abbrlink: 34334
+date: 2023-05-13 15:57:20
+categories:
+---
+
+qemu plugin基本概念以及使用
+----------------------------
+
+qemu tcg支持用插件的方式为qemu新增功能，qemu源码里作为示例自带了几个插件，我们先
+编译使用下qemu自带的cache插件。
+
+一般情况下qemu tcg是不模拟cache的，qemu自带了一个简单模拟cache的插件。我们在配置
+qemu的时候要带上--enable-plugins，编译完qemu后，进入qemu/build/contrib/plugins/,
+在这个目录下运行make，之后可以看见qemu的自带的plugin都编译出了，其中就有cache的
+plugin: libcache.so。
+
+按如下运行命令，可以带着cache plugin运行qemu，-d plugin输出plugin里的打印信息，
+-D指定打印信息输出的文件：
+```
+qemu-system-riscv64 -m 256m -nographic -machine virt \
+-kernel ~/repos/linux/arch/riscv/boot/Image \
+-append "console=ttyS0 root=/dev/ram rdinit=/init" \
+-initrd ~/repos/buildroot/output/images/rootfs.cpio.gz \
+-plugin ~/repos/qemu/build/contrib/plugins/libcache.so \
+-d plugin -D ~/qemu_cache_plugin_log
+```
+如上运行qemu后，linux内核启动从1s到了30s，可见qemu带plugin运行的速度是很慢的。
+
+qemu plugin机制分析
+--------------------
+
+qemu要实现plugin就必然向外，也就是向plugin提供一组API接口，plugin使用这组API向qemu
+注册以及获取qemu模拟的guest的信息。qemu内部为了支持plugin机制也会增加plugin的核心
+实现代码。
+
+首先我们从qemu user mode入手看下qemu是如何解析命令行里输入的plugin so的。
+```
+main
+  +-> handle_arg_plugin(const char *arg)
+    +-> qemu_plugin_opt_parse(const char *optarg, QemuPluginList *head)
+```
+可以看见qemu user mode会把解析到的每个plugin的信息放到qemu_plugin_desc，再把所有
+的qemu_plugin_desc保存到一个叫plugins的全局链表里。
+
+main函数里随后会使用qemu_plugin_load_list加载plugin so:
+```
+qemu_plugin_load_list()
+  +-> plugin_load()
+    +-> ctx->handle = g_module_open(desc->path, G_MODULE_BIND_LOCAL);
+    +-> g_module_symbol(ctx->handle, "qemu_plugin_install", &sym));
+        install = (qemu_plugin_install_func_t) sym;                                 
+    +-> g_hash_table_lookup(plugin.id_ht, &ctx->id);
+    +-> QTAILQ_INSERT_TAIL(&plugin.ctxs, ctx, entry);
+    +-> install(ctx->id, info, desc->argc, desc->argv);                        
+```
+qemu内部对一个plugin的信息保存在qemu_plugin_ctx里，qemu全局的plugin信息保存到
+struct qemu_plugin_state plugin里，注意上面的qemu_plugin_desc保存的只是plugin对应
+的文件路径、参数等信息。struct qemu_plugin_state plugin里会用链表和哈希表分别记录
+所有plugin。
+
+qemu针对每个plugin，打开对应的动态库，执行动态库里名为qemu_plugin_install的函数。
+每个plugin必须实现这个注册接口。
+
+我们以libcache看看plugin怎么实现qemu_plugin_install。
+```
+/* qemu/contrib/plugins/cache.c */
+qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info, int argc, char **argv)
+  [...]
+  +-> qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);                   
+    +-> plugin_register_cb(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS, cb);                   
+  +-> qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);                      
+```
+这个函数做了一些自己plugin的初始化后，调用了qemu plugin API注册了vcpu_tb_trans和
+plugin_exit两个函数。所谓注册，就是把这两个函数保存到了plugin对应qemu_plugin_ctx
+(后面简称ctx)的qemu_plugin_cb(后面简称cb)里，注意ctx里的cb是个数组，不同的数组项
+描述不同的event，比如如上的QEMU_PLUGIN_EV_VCPU_TB_TRANS就是一个event，qemu在翻译
+执行主流程里会调用这些注册的回调函数。
+
+我们可以先观察下如上vcpu_tb_trans的行为，去掉其中业务相关的逻辑，其主逻辑如下：
+```
+vcpu_tb_trans()
+  +-> n_insns = qemu_plugin_tb_n_insns(tb);                                       
+  +-> for (i = 0; i < n_insns; i++) {                                             
+      struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);         
+      effective_addr = (uint64_t) qemu_plugin_insn_vaddr(insn);
+      [...]
+      qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem_access, QEMU_PLUGIN_CB_NO_REGS, rw, data);
+      qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec, QEMU_PLUGIN_CB_NO_REGS, data);
+  +-> }                                                                           
+```
+这个函数对于一个tb，调用qemu plugin的API得到guest指令数目、每个指令相关信息，并
+针对每条guest指令使用qemu plugin API注册相关的回调函数，比如这里对每条guest指令
+注册了vcpu_mem_access和vcpu_insn_exec两个函数。不同注册函数注册的回调函数在qemu
+翻译执行主循环的不同位置被触发，plugin需要根据API的语意使用API注册回调函数。
+
+我们进一步分析qemu内部是怎么实现回调函数的注册和触发的。
+```
+void qemu_plugin_register_vcpu_mem_cb(struct qemu_plugin_insn *insn,            
+                                      qemu_plugin_vcpu_mem_cb_t cb,             
+                                      enum qemu_plugin_cb_flags flags,          
+                                      enum qemu_plugin_mem_rw rw,               
+                                      void *udata)                              
+{                                                                               
+    plugin_register_vcpu_mem_cb(&insn->cbs[PLUGIN_CB_MEM][PLUGIN_CB_REGULAR],   
+                                    cb, flags, rw, udata);                      
+}                                                                               
+```
+从qemu_plugin_insn的内部结构可以看出来，针对一个guest指令，plugin可以注册两大类
+回调函数：PLUGIN_CB_MEM和PLUGIN_CB_INSN，每一类里又分: PLUGIN_CB_REGULAR和PLUGIN_CB_INLINE。
+被注册的函数以及相关的参数统统保存在insn的对应cb里(qemu_plugin_dyn_cb)。这里只是
+保存了相关注册函数信息，被注册的函数还没有和qemu主流程关联在一起，和qemu主流程关
+联的过程还是在qemu主流程里实现。
+
+整个qemu翻译的主流程中被插入了plugin的桩函数以及桩函数的替换逻辑:
+```
+/* qemu/accel/tcg/translator.c */
+translator_loop
+  +-> plugin_enabled = plugin_gen_tb_start()
+  +-> while (true) {
+          if (plugin_enabled) {                                                   
+              plugin_gen_insn_start(cpu, db);                                     
+                +-> plugin_gen_empty_callback(PLUGIN_GEN_FROM_INSN)
+                  +-> gen_wrapped(from, PLUGIN_GEN_ENABLE_MEM_HELPER, gen_empty_mem_helper)
+                    +-> gen_plugin_cb_start(from, type, 0);                                         
+                    +-> func();                                                                     
+                    +-> tcg_gen_plugin_cb_end();                                                    
+                  +-> gen_wrapped(from, PLUGIN_GEN_CB_UDATA, gen_empty_udata_cb);             
+                  +-> gen_wrapped(from, PLUGIN_GEN_CB_INLINE, gen_empty_inline_cb);           
+          }                                                                       
+
+          ops->translate_insn(db, cpu);                                       
+
+          if (plugin_enabled) {                                                   
+              plugin_gen_insn_end();                                              
+          }                                                                       
+      }
+
+  +-> if (plugin_enabled) {                                                       
+          plugin_gen_tb_end(cpu);                                                 
+      }                                                                           
+```
+plugin_gen_tb_start/plugin_gen_insn_start/plugin_gen_insn_end用来插入桩函数，
+plugin_gen_tb_end主要用来做桩函数的替换。
+
+我们顺序看一个plugin_gen_insn_start的处理。可以看见，这里插入了一些中间码，大概的
+情况是：
+```
+plugin_cb_start PLUGIN_GEN_FROM_INSN, PLUGIN_GEN_ENABLE_MEM_HELPER
+movi_64 ptr, 0
+/* 清空CPUState里plugin_mem_cbs保存的memory相关的回调函数 */
+st_i64 ptr CPUState, offset of plugin_mem_cbs
+plugin_cb_end
+
+plugin_cb_start PLUGIN_GEN_FROM_TB, PLUGIN_GEN_CB_UDATA
+ld_i32 cpu_index CPUState, offset of cpu_index
+call plugin_vcpu_udata_cb cpu_index, udata
+plugin_cb_end
+
+plugin_cb_start PLUGIN_GEN_FROM_TB, PLUGIN_GEN_CB_INLINE
+ld_i64 val, ptr, 0
+addi_i64 val, val, 0xdeadface
+st_i64 val, val, 0
+plugin_cb_end
+```
+如上的plugin_vcpu_udata_cb是一个空的桩函数。
+
+qemu在plugin_gen_tb_end把plugin注册的回调函数插入qemu翻译执行逻辑里，使用的基本方
+法就是使用qemu_plugin_insn中保存的回调函数替换如上的桩函数。
+```
+plugin_gen_tb_end
+  +-> qemu_plugin_tb_trans_cb(cpu, ptb);                                          
+  +-> plugin_gen_inject(ptb);                                                     
+```
+qemu_plugin_tb_trans_cb扫描qemu全局的plugin，针对每个plugin，调用之前注册的
+QEMU_PLUGIN_EV_VCPU_TB_TRANS event对应的回调函数。具体到上面的cache plugin就是
+其中的vcpu_tb_trans函数。
+
+我们就用cache的vcpu_tb_trans继续分析，这个函数里最主要的针对tb里的每个guest指令
+调用qemu plugin API注册回调函数，如上，其实这里的注册就是把回调函数保存到guest指
+令insn结构体里，我们具体看其中一个：
+```
+qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem_access, QEMU_PLUGIN_CB_NO_REGS, rw, data);
+  +-> plugin_register_vcpu_mem_cb(&insn->cbs[PLUGIN_CB_MEM][PLUGIN_CB_REGULAR], cb, flags, rw, udata);
+```
+
+plugin_gen_inject用注册的回调函数替换掉如上call中间码里的函数地址，并对输入参数做
+必要的调整：
+```
+plugin_gen_inject(ptb)
+
+  QTAILQ_FOREACH(op, &tcg_ctx->ops, link)
+    switch (op->opc)
+    [...]
+    case INDEX_op_plugin_cb_start:                                          
+
+      enum plugin_gen_from from = op->args[0];                            
+      enum plugin_gen_cb type = op->args[1];                              
+                                                                          
+      switch (from)
+      [...]
+      case PLUGIN_GEN_FROM_INSN:                                          
+        switch (type)
+        case PLUGIN_GEN_CB_UDATA:                                       
+          plugin_gen_insn_udata(plugin_tb, op, insn_idx);             
+          break;                                                      
+        case PLUGIN_GEN_CB_INLINE:                                      
+          plugin_gen_insn_inline(plugin_tb, op, insn_idx);            
+          break;                                                      
+        case PLUGIN_GEN_ENABLE_MEM_HELPER:                              
+          plugin_gen_enable_mem_helper(plugin_tb, op, insn_idx);      
+          break;                                                      
+```
+如上代码识别plugin_tb_start开头的一段中间码，然后做匹配位置的函数替换以及参数生成。
+还是看如上PLUGIN_GEN_FROM_INSN对应的处理(语意是获取指令执行之前的信息)，如上插入
+了三段以plugin_cb_start开头的中间码，这里的三个case分别处理相关的中间码。
+
+我们深入看下plugin_gen_enable_mem_helper的处理。
+```
+plugin_gen_enable_mem_helper
+  +-> inject_mem_enable_helper(insn, begin_op);                                   
+        /*
+         * 如果对这个指令没有注册memory类型的回调, 或者没有calls_helpers? 就删掉
+         * 之前的中间码桩。不做任何操作直接返回了。
+         */
+    +-> plugin_insn->mem_helper = plugin_insn->calls_helpers && n_cbs;              
+        if (likely(!plugin_insn->mem_helper)) {                                     
+            rm_ops(begin_op);                                                       
+            return;                                                                 
+        }                                                                           
+	/* 把注册的回调插入plugin的dyn_cb_arr_ht哈希表里 */
+    +-> qemu_plugin_add_dyn_cb_arr(arr);                                            
+        /* 通过改变中间码插入回调函数 */
+    +-> inject_mem_helper(begin_op, arr);                                           
+      /*                                                                          
+       * 在end后插入op，copy begin后的op到新op上，并做必要的修改，返回的begin_op
+       * 指向后一个节点，op指向最新的"end"。比如，这里了是新加了mov IR, 并修改mov
+       * 的输入为注册回调描述结构的地址:
+       *
+       * begin -> mov -> st -> end -> op(mov)
+       */
+      op = copy_const_ptr(&begin_op, end_op, arr);                                
+                                                                                  
+      /* 用上面同样的方法修改store指令：begin -> mov -> st -> end -> mov -> st */                                                                         
+      op = copy_st_ptr(&begin_op, op);                                            
+
+      /*                                                                          
+       * 把中间码的桩都删去，只留下修改后的mov和st:
+       * begin -> mov -> st -> end -> mov -> st                                 
+       * <-------- remove -------> 
+       */                                                                         
+      rm_ops_range(orig_op, end_op);                                              
+```
+经过上述操作，最终结果是把plugin中注册的回调函数保存到了CPUState的plugin_mem_cbs。
+
+原来的中间码序列：
+```
+plugin_cb_start PLUGIN_GEN_FROM_INSN, PLUGIN_GEN_ENABLE_MEM_HELPER
+movi_64 ptr, 0
+st_i64 ptr CPUState, offset of plugin_mem_cbs
+plugin_cb_end
+```
+变成了：
+```
+movi_64 ptr, arr地址
+st_i64 ptr CPUState, offset of plugin_mem_cbs
+```
+
+在load/store的实现里(其中调用helper函数里)，qemu调用qemu_plugin_vcpu_mem_cb的到
+CPUState中保存的memory相关回调，并执行。
+
+如上我们分析了一个qemu处理plugin的特例情况，其它plugin插桩以及替换的原理也是一样
+的，比如对于plugin_cb_start PLUGIN_GEN_FROM_TB, PLUGIN_GEN_CB_UDATA的情况，qemu
+直接用call IR插入了一个空helper函数，后面的替换直接修改call IR里保存的函数地址以及
+函数入参就好了。
+
+如上我们大致根据plugin的执行流程分析其工作原理，下面在横向的维度上把plugin的基本
+概念再展开下。
+
+从plugin_gen_from的定义上看，qemu plugin的插桩点包括：
+```
+ /* TB翻译前 */                                                              
+ PLUGIN_GEN_FROM_TB,                                                         
+
+ /* guest指令翻译前 */                                                       
+ PLUGIN_GEN_FROM_INSN,                                                       
+
+ /* memory操作相关的点 */
+ PLUGIN_GEN_FROM_MEM,                                                        
+ 
+ /* guest指令翻译后 */                                                       
+ PLUGIN_GEN_AFTER_INSN,                                                      
+```
+指令和TB的插桩点在qemu翻译执行的主循环里，如上的分析中已经有涉及。PLUGIN_GEN_FROM_MEM
+在load/store的公共实现代码里插桩时会用到，在qemu/tcg/tcg-op.c里load/store IR的实现
+tcg_gen_qemu_ld/st_i32/i64会调用plugin_gen_mem_callbacks插入参数为PLUGIN_GEN_FROM_MEM
+的plugin_cb_start/end，以及空的helper桩函数。
+
+可以看到，qemu对应中间码使用插入helper桩函数再替换的方式支持plugin。对于helper函数
+里需要支持plugin时，qemu把回调函数先保存到CPUState里，然后在helper里直接调用回调
+函数，这个就是我们上面重点分析的例子里的情形。
+
+写一个自己的qemu plugin
+------------------------
+
+如上分析了qemu plugin的逻辑，我们再从plugin的角度看看qemu都提供的那些API出来，以
+及他们的大概用法。我们还是从cache plugin入手，然后横向展开看看。
+
+如上分析里，cache plugin首先使用qemu_plugin_register_vcpu_tb_trans_cb注册了在tb
+翻译结束会调用的回调函数(vcpu_tb_trans)，这个回调函数可以得到tb里guest指令的句柄，
+从而plugin里可以继续针对guest指令注册回调函数。
+
+我们先看下第一层，也就是除了tb翻译完成可以注册回调，还有那些地方可以注册回调。qemu
+里还提供了如下注册plugin的地方：
+```
+ QEMU_PLUGIN_EV_VCPU_INIT
+ QEMU_PLUGIN_EV_VCPU_EXIT
+ QEMU_PLUGIN_EV_VCPU_TB_TRANS
+ QEMU_PLUGIN_EV_VCPU_IDLE
+ QEMU_PLUGIN_EV_VCPU_RESUME
+ QEMU_PLUGIN_EV_VCPU_SYSCALL
+ QEMU_PLUGIN_EV_VCPU_SYSCALL_RET
+ QEMU_PLUGIN_EV_FLUSH
+ QEMU_PLUGIN_EV_ATEXIT
+```
+如上的每个地方，qemu都提供了一个API来注册回调，比如QEMU_PLUGIN_EV_VCPU_INIT对应
+的API就是qemu_plugin_register_vcpu_init_cb。如上回调点大概意思可以猜出来，但是要
+知道确切意思还的去看qemu的代码，qemu并没有把自己执行的模型表述的很清楚。
+
+cache plugin里针对tb里的每个guest指令注册了vcpu_mem_access和vcpu_insn_exec，我们
+看看针对指令都可以怎么注册回调函数。针对guest指令可以注册内存读写相关的回调和指令
+执行相关的回调，每种类型又分为cb和inline:
+```
+qemu_plugin_register_vcpu_mem_cb
+qemu_plugin_register_vcpu_mem_inline
+
+qemu_plugin_register_vcpu_insn_exec_cb
+qemu_plugin_register_vcpu_insn_exec_inline
+```
+对于指令执行相关的回调，qemu会在每个指令执行前调用，对于内存读写相关的回调，qemu
+会在访存指令的helper实现函数以及访存指令完成时调用。cb类型的回调是plugin里实现回调
+函数，qemu主流程里调用plugin里定义的函数来实现信息记录的，而所谓inline并没有调用
+helper函数记录信息，而是在plugin里定义操作指令和操作的目的地址，qemu主流程里每当
+到了调用点就对目的地址做相关的操作，目前qemu定义的操作还只有add，可以看出，inline
+是一种轻量级的记录方式，qemu内部实现上，只需要根据plugin提供的操作地址稍微调整下
+主流程里的桩中间码就可以做到。
+
+qemu针对tb执行也提供了可以注册回调的入口：
+```
+qemu_plugin_register_vcpu_tb_exec_cb
+qemu_plugin_register_vcpu_tb_exec_inline
+```
+使用如上API注册回调，qemu会在执行tb前调用回调或者像上面分析中提到的那样更新注册
+地址上的数据。
+
+qemu plugin里需要获得guest指令或者tb的一些参数，为此qemu还对外提供了一组获取guest
+指令或者tb的信息的辅助函数。这些辅助函数以及上述所提到的API在include/qemu/qemu-plugin.h
+里均有定义。

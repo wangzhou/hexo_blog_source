@@ -27,3 +27,13 @@ comments: false
 
    宋宝华老师讲解cache的文章，内容深入浅出：
    https://cloud.tencent.com/developer/article/1844992
+
+ - Arm Neoverse N1 Core: Performance Analysis Methodology
+
+   基于Arm Neoverse N1 Core，讲解怎么利用PMU做软件调优：
+   https://armkeil.blob.core.windows.net/developer/Files/pdf/white-paper/neoverse-n1-core-performance-v2.pdf
+
+ - Writing a Linux Debugger
+   
+   这个系列博客一共10篇，介绍怎么写一个基于DWARF调试信息的简单调试器：
+   https://blog.tartanllama.xyz/writing-a-linux-debugger-setup/
