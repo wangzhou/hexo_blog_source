@@ -4,8 +4,8 @@ date: 2021-05-23 09:41:44
 comments: false
 ---
 
- - Sherlock Wang 电子邮件：wangzhou89@126.com
+我叫Sherlock Wang，是一名计算机软件工程师，平时的工作偏系统软件，研究的内容包括
+RISCV/ARM体系结构，Linux内核和驱动，CPU模拟器(QEMU)等。
 
- - Linux驱动和内核开发者。
-
- - 喜好研究系统软件以及计算机体系结构，研究内容包括Linux内核，QEMU，RISCV/ARM体系结构。
+这个博客不涉及任何工作相关的内容，博文只是一些通用知识的总结。我的电子邮件是
+wangzhou89@126.com，欢迎发邮件讨论问题。
