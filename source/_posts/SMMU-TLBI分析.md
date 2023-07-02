@@ -9,7 +9,7 @@ abbrlink: e96c7a44
 date: 2021-06-19 10:28:42
 ---
 
-1. SMMU E2H支持
+SMMU E2H支持
 ---------------
 
  SMMU SVA支持的patchset里有一个补丁：iommu/arm-smmu-v3: Add support for VHE
@@ -31,7 +31,7 @@ date: 2021-06-19 10:28:42
 
  这个补丁做了上述的修改，使得SVA和内核地址的tlbi在VHE使能的时候都可以正常使用。
 
-2. SMMU tlbi相关命令
+SMMU tlbi相关命令
 --------------------
 
  SMMU spec 4.4章节介绍了tlbi相关的command, 上面提到的相关tlbi命令在这一章节中
@@ -43,7 +43,7 @@ date: 2021-06-19 10:28:42
  num, asid, address, tg, ttl, leaf。当SMMU硬件支持tlbi by range(IDR3_RIL = 1)时，
  还可以用带VA的tlbi实现tlbi by range.
 
-3. linux SMMU驱动里的实现
+linux SMMU驱动里的实现
 -------------------------
 
  因为SVA没有用tlbi，所以我们主要分析内核dma内存中的tlbi就好了。
