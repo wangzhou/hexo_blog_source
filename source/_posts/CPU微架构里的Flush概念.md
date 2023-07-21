@@ -1,7 +1,7 @@
 ---
 title: CPU微架构里的Flush概念
 tags:
-  - CPU体系结构
+  - 计算机体系结构
 description: 这篇文章整理下CPU微架构里Flush相关的概念，既是笔记也是一个科普。
 abbrlink: 25982
 date: 2023-07-15 16:40:21
