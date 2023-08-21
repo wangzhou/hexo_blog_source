@@ -3,7 +3,7 @@ title: cache基础概念
 tags:
   - cache
   - 计算机体系结构
-  - ARMv8
+  - ARM64
 description: >-
   本文是学习cache基础知识过程中的一个笔记。学习的材料是《深入理解计算机系统》和
   ARMv8的编程指导手册。这个笔记会梳理cache相关的几个基础概念，比如，cache line， cache set，

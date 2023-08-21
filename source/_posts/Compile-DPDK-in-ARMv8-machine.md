@@ -1,7 +1,7 @@
 ---
 title: Compile DPDK in ARMv8 machine
 tags:
-  - ARMv8
+  - ARM64
   - DPDK
 description: 'This doc is a quirk note about the process of DPDK compile in ARMv8 machine. '
 abbrlink: 87441d3f
