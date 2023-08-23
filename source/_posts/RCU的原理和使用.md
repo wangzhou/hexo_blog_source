@@ -1,0 +1,111 @@
+---
+title: RCU的原理和使用
+tags:
+  - Linux内核
+description: 本文描述RCU锁的基本原始和使用。详细代码分析需要合适的时机再补进来，太复杂了。
+abbrlink: 13350
+date: 2023-08-22 18:08:51
+categories:
+---
+
+基本逻辑
+---------
+
+RCU主要解决多个CPU core读写一个数据时的同步问题，一般情况下，我们都是加锁做同步，
+RCU这种锁使得读写core可以最大的并行，对于读多写少的场景可以大幅提升性能。
+
+RCU在需要更改数据的时候，不直接更新到现有数据上，而是先拷贝一份数据，在拷贝的数据
+上先把数据更新好，然后再原子的更新数据，当数据是用指针访问时，只要用一个原子操作
+更新掉指针就好。更改数据按照这样的逻辑，可以不断的进行，这样系统里就会出现多个数据
+的版本，但是每个版本上的数据是一致的，只是不同版本的数据之间不一致。读数据时，就
+直接读当前最新的数据就好，读到的数据使用完成，当没有其它的core还是使用时，就可以把
+这个版本的数据释放掉，因为这个版本的数据可能被新的写操作更新了，系统里最新的数据
+已经不是这个版本了。
+
+下图是一个RCU的示意图:
+```
+ -------> time                               data can be released
+                                              /
+   point_to_data(ptd)            ptd1        /            ptd2
+         |                        |         /              |    
+         v                        |        /               |     data1 can be released
+      +------+                    |       /                |        /
+      | data |----------------------------                 |       /
+      +------+                    v                        |      /
+         |                    +-------+                    |     /
+         |                    | data1 |--------------------------
+         |                    +-------+                    v
+         |                        |                    +-------+
+         |                        |                    | data2 |
+         |                        |                    +-------+
+ reader1:|--data-----             |                        |
+         |                        |                        |
+ reader2:|   --data-----------------------                 |
+         |                        |                        |
+ reader3:|                        | ---data1---------------------
+         |                        |                        |
+ reader4:|                        |   ----data1-------     |
+         |                        |                        |
+ reader5:|                        |                        |  data2
+```
+其中data是要同步的对象。每次更新data，都是在一个新拷贝上做更新，对于之前的旧值，
+如果还有reader在用就不能释放，直到没有reader还在用老值时，就可以把老值释放掉。
+reader总是使用当前最新的版本。所以，可以看出来RCU实现最核心的地方是老值的释放逻辑。
+
+Linux内核中的RCU API
+---------------------
+
+我们先看下使用RCU保护一个全局变量的具体使用方法。比如，我们要保护如下全局变量：
+```
+ struct data {
+        int value;
+ };
+```
+程序里用一个指针struct data __rcu *p 访问这个全局变量，那么这个变量的访问、修改
+代码大概是：
+```
+/* 访问数据 */
+rcu_read_lock();
+struct data *d = rcu_dereference(p);
+rcu_read_unlock();
+
+/* 修改数据 */
+struct data *new = kmalloc(sizeof(*p), GFP_KERNEL);
+new->value = 10;
+rcu_assign_pointer(p, new);
+synchronize_rcu();
+```
+
+我们从朴素的逻辑出发看看这个问题，首先rcu_dereference和rcu_assign_pointer之间保持
+互斥，就可以保证对指针p的更新和引用是互斥的。考虑synchronize_rcu的实现，这个函数
+需要在老值不再使用的时候把他们释放掉，最直观的思路就是把data的所有版本的指针都记录
+起来，对于其中的每个值使用引用计数的办法记录是否还有用户使用，可以在lock的时候引用
+计数加1，在unlock的时候引用计数减1，在synchronize_rcu里定期扫描全部指针的引用计数，
+如果为0，表示没有reader访问了，就可以把对应这个版本的data释放掉。
+
+显然内核里不是按如上的逻辑实现的，这样实现每个RCU锁使用的资源太多了。经典的内核RCU
+实现中，lock/unlock只是做关内核抢占/开内核抢占的操作，synchronize_rcu中使用cpu_mask
+记录每个CPU的调度情况，当每个CPU都调度过一次后，之前做RCU read的CPU一定已经离开
+关抢占的临界区，这样可以认为所有对新版本数据的读者都已经离开临界区了。
+
+有几个问题还没有想明白：对一个RCU保护数据的读操作可能发生在synchronize_rcu之后，
+在这个间隙内，可以先发生一次调度，再进行RCU read，synchronize_rcu不会错误的检测到
+已经调度过，就认为没有RCU reader么？
+```
+    CPU0                            CPU1
+
+    rcu_assign_pointer(p, new);
+    synchronize_rcu
+                                    schedule
+                                    RCU read p
+```
+RCU检测所有CPU都调度一次，有的CPU并没有做RCU read，那么理论上都不需要检测，如何
+做到这个？有些CPU下线了或者进入低功耗状态，应该在做检测的CPU集合中去掉这些CPU。
+
+内核里提供了基于RCU的基础数据结构，比如，内核里RCU保护的链表的实现逻辑的代码位置在:
+linux/include/linux/rculist.h。
+
+RCU用户态库
+------------
+
+有各种RCU用户态库支持在用户态使用RCU，比如，liburcu。
