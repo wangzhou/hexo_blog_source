@@ -1,7 +1,7 @@
 ---
 title: riscv qemu virt平台CPU拓扑分析
 tags:
-  - qemu
+  - QEMU
   - riscv
   - CPU
 description: 本文分析riscv qemu virt平台上和CPU相关的拓扑，分析基于qemu v7.1.50代码。

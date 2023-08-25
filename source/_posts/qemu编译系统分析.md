@@ -1,7 +1,7 @@
 ---
 title: qemu编译系统分析
 tags:
-  - qemu
+  - QEMU
   - 编译链接
 description: >-
   qemu的编译系统是个大杂烩，它没有用Linux传统的autoconfig，确有一个configure文件，
