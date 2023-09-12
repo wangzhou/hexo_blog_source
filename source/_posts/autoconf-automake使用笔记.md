@@ -103,3 +103,7 @@ int main()
 	return 0;
 }
 ```
+
+注意，如上只是介绍了使用autoconf/autoheader/automake构建一个程序的流程，实际上
+这三个工具是相互独立的，有各自独立完成的功能逻辑，我们也可以只使用其中的一个或者
+几个工具来生成Makefile。

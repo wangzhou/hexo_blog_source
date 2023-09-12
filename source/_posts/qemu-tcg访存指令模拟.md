@@ -161,3 +161,5 @@ load/store host地址
    /* 直接生成host load/store指令 */
    tcg_out_opc_store()/tcg_out_opc_imm()
 ```
+
+注意在qemu代码(v8.0.0)的docs/devel/loads-stores.rst有qemu内部各种内存访问API的说明。
