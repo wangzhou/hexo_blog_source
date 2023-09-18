@@ -187,7 +187,7 @@ riscv barrier指令
 ARM内存序以及barrier指令
 -------------------------
 
- (todo)
+ 相关逻辑可以参考[这里](https://wangzhou.github.io/ARM64内存屏障/)。
 
 Linux内核内存序介绍
 --------------------
