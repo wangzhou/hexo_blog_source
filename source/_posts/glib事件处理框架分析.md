@@ -1,0 +1,90 @@
+---
+title: glib事件处理框架分析
+tags:
+  - glib
+description: >-
+  本文分析glib中事件处理框架的基本逻辑，知乎上的这篇文章简单demo了下glib事件
+  处理的使用https://zhuanlan.zhihu.com/p/512939620，这篇文章写的不错，本文在
+  次基础上，具体看看glib是如何实现相关功能的。本文分析的glib库的版本是2.76.1, 分析基于ARM64机器，使用的系统是ubuntu20.04。
+abbrlink: 10087
+date: 2023-09-21 14:11:25
+categories:
+---
+
+基本逻辑
+---------
+
+glib库提供了一个事件处理框架，用户可以向这个框架上注册需要处理的事件，事件处理框架
+可以不断检测是否有注册事件发生，如果有事件发生就去调用注册的处理函数处理。
+
+glib库中和事件处理框架相关的概念有：上下文(GMainContext)，处理事件的循环(GMainLoop)，
+事件源(GSource)，事件源对应的处理函数(GSourceFuncs)，dispatch后的处理函数(GSourceFunc)，
+IO的封装(GIOChannel)，poll fd的封装(GPollFD)。
+
+基本的使用逻辑是，GMainContext是一个基础的上下文配置，各种GSource可以添加到一个
+GMainContext中，每个GSource都可以配置自己的GSourceFuncs处理函数，这几个处理函数
+主要关注事件处理的基本流程，就是事件处理的四个基本阶段：prepare/check/dispatch/finalize，
+用户还可以注册dispatch后的主业务处理函数，就是上面的GSourceFunc。
+
+用户可以把GPollFD封装的poll fd和GSource绑定起来，这样事件处理框架就可以主动的去
+poll对应的fd。以fd做入参创建的GIOChannel后，用户还可以调用glib提供的GIOChannel API
+进行各种IO操作。
+
+如上配置好一个GMainContext相关的事件处理模型后，用户可以创建一个GMainLoop，把这个
+loop和GMainContext绑定后，就可以调用g_main_loop_run叫这个loop运行起来。这个loop
+运行的基本逻辑就是不断的监控GMainContext里的所有source，对于准备好的source，依次
+调用prepare/check/dispatch/finalize以及主业务处理函数，这个调用过程是一个批量处理
+的过程，就是对于一次循环里准备好的所有source调用prepare等函数。
+
+glib里额外增加了超时事件(timeout)和idle事件的接口，这两个事件源的底层也是依赖上述
+基本部件实现的。
+
+代码分析
+---------
+
+我们看大概看下glib里的相关代码逻辑。glib启动事件循环的核心函数是g_main_loop_run，
+在其它API做配置后，调用该函数就可以启动事件循环。
+```
+/* glib/glib/gmain.c */
+g_main_loop_run (GMainLoop *loop)
+  +-> while (g_atomic_int_get (&loop->is_running))
+        g_main_context_iterate (loop->context, TRUE, TRUE, self);
+          +-> g_main_context_prepare (context, &max_priority); 
+          +-> g_main_context_poll (context, timeout, max_priority, fds, nfds);
+          +-> g_main_context_check (context, max_priority, fds, nfds);
+          +-> g_main_context_dispatch (context);
+```
+事件循环的主体逻辑比较直白，就是反复的监控注册的事件，当监控的事件发生时就调用相关
+的处理函数处理。在Linux系统上就是使用poll监控事件fd的集合。
+
+在所有事件中超时事件和idle事件的实现比较特殊一点，我们下面单独介绍。
+
+timeout的实现
+--------------
+
+glib中定时器的使用比较简单，直接用g_timeout_add就可以注册一个timeout事件，但是glib
+里注册的timeout时间不是精确的时间，这个在timeout的具体实现里也可以看出来。
+
+glib的timeout事件并没有用通用的定时器去实现，而是直接用poll自带的timeout参数实现的。
+在g_main_context_prepare里，glib会计算出所有监控soure的最小的超时时间，这其中就
+包括了timeout的超时时间，glib把这个最小的超时时间作为这一轮context poll的timeout。
+
+idle的实现
+-----------
+
+idle的实现比较直白，g_idle_add直接加一个事件源进来，当系统里没有更高优先级的事件
+在执行时，就调用idle相关的回调函数。
+
+使用demon
+----------
+
+知乎上已经有一个很好的[demon](https://zhuanlan.zhihu.com/p/512939620)。glib库源码的tests目录里也有使用示例。
+
+glib库调试
+-----------
+
+glib库的编译可以参考[这里](https://wangzhou.github.io/如何使用meson构建程序/)，把如上demon代码中的测试程序链接自己编译的glib库，需要
+把其中的Makefile加上LDFLAGS = -Wl,-rpath=your_glib_path。如上编译出的demon程序，
+使用gdb无法跟踪到glib库的内部，重新配置下meson，打开glib的debug选项：
+meson configure -Dglib_debug=enabled，重新编译下glib就可以用gdb调试glib了。注意，
+如上的配置命令需要在glib的构建目录下运行。
