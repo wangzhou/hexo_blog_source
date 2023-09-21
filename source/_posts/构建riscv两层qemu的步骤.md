@@ -94,7 +94,7 @@ qemu-system-riscv64 \
  	-device virtio-9p-pci,fsdev=p9fs,mount_tag=p9,bus=pcie.0 \
 	-fsdev local,id=p9fs,path=/home/sherlock/p9root,security_model=mapped
 ```
-注意，qemu之前的中间版本可能使用-cpu rv64,x-h=true使能H扩展，在qemu v7,0.0以及之后
+注意，qemu之前的中间版本可能使用-cpu rv64,x-h=true使能H扩展，在qemu v7.0.0以及之后
 的版本都用-cpu rv64,h=true使能H扩展。
 
 启动第二层qemu:
