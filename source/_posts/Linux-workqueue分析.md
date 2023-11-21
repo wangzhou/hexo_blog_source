@@ -13,7 +13,7 @@ abbrlink: 6f5b0f9e
 date: 2021-06-27 18:01:35
 ---
 
-1. workqueue基本使用方法
+workqueue基本使用方法
 ------------------------
 
  workqueue机制可以异步执行内核其他模块的任务。内核其他模块有任务需要异步执行的
@@ -108,12 +108,12 @@ date: 2021-06-27 18:01:35
      +------------+
 ```
 
-2. workqueue代码的基本结构
+workqueue代码的基本结构
 --------------------------
 
  详见简介中的连接, 这四篇文章已经讲的很好。
 
-3. workqeueu API再挖掘
+workqeueu API再挖掘
 ----------------------
  
  如上，workqueue的work不会直接和worker绑定，而是在queue_work的时候选择一个
@@ -136,7 +136,7 @@ date: 2021-06-27 18:01:35
  注意, 在申请workqueue的时候加上WQ_SYSFS参数，可以把该workqueue的信息通过sysfs
  暴露到用户态：e.g. /sys/bus/workqueue/devices/writeback
 
-4. 测试
+测试
 -------
 
  如下附录中的测试代码, 以下是测试得到的结论:
@@ -161,5 +161,5 @@ date: 2021-06-27 18:01:35
 	 即使频繁调用queue_work_on pool也不会创建新线程。
 
 附录
-----
+-----
  wq_test.c测试代码：https://github.com/wangzhou/tests/blob/master/kwq/wq_test.c
