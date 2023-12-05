@@ -10,6 +10,8 @@ date: 2021-06-21 13:04:19
 宏
 -----
 
+  C语言中宏的使用可以参考gcc preprocessor的说明文档：https://gcc.gnu.org/onlinedocs/cpp/
+
   \#\# 用来拼接前后的符号
   \# 用来把一个符号字符串化
   
@@ -67,6 +69,8 @@ int do_##name(int a, int b)     \
 FUN(add, +)
 FUN(sub, 1)
 ```
+  
+  字符串里无法定义宏。
 
 自动数据类型转换
 -------------------
@@ -115,12 +119,12 @@ xxx@kllp05:~/tests/c_note$ ./a.out
 ```
 
 长跳转
----------
+-------
 
   setjmp, longjmp: https://www.cnblogs.com/hazir/p/c_setjmp_longjmp.html
 
 可变参数函数
----------------
+-------------
 
   https://www.cnblogs.com/cpoint/p/3368993.html
 
