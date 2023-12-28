@@ -1,0 +1,157 @@
+---
+title: Linux perf构架分析
+tags:
+  - Linux内核
+  - 软件性能
+description: 本文分析Linux上perf子系统的基本逻辑，分析基于的内核版本是v6.7-rc6，分析基于 ARM64架构和RISCV构架。
+abbrlink: 33051
+date: 2023-12-28 19:47:28
+categories:
+---
+
+## 基本逻辑
+
+perf是Linux上支持程序调优的子系统，这个子系统很大的依赖硬件自带的PMU设备完成程序
+性能相关参数的采集，程序员可以使用收集到的数据完成程序调优。
+
+所谓PMU设备其实是核上自带一组counter以及其控制寄存器的抽象，程序员通过PMU的控制
+寄存器控制counter收集的数据，以及counter的运行或停止等。一般来说，counter有两种
+使用方法，一种是直接记录对应事件发生的次数，记录程序的运行参数时，通常这样使用
+counter，比如我们记录运行一个程序需要多少个CPU cycle。另一种是给counter设定一个
+门限，当计数到门限时触发中断，中断处理函数中可以做相应的记录，这种使用方法一般用
+来做采样，比如我们可以每隔一定的cycle触发一个中断，在中断处理函数里记录当前PC对应
+的函数，这样就可以根据记录数据得到基于采样的程序执行时的热点函数分布。
+
+Linux的perf子系统对于PMU进行了抽象封装，提供一组易用的接口给用户使用。同时perf子
+系统还把基于软件trace point等的各种其他观测机制集成进来，我们这里先只考虑和PMU对
+应的perf功能。
+
+我们考虑perf子系统需要做的工作。1. perf子系统需要给用户提供一组接口，支持用户发送
+程序信息收集的命令，读程序运行产生的数据，2. 因为各个硬件厂家的PMU各不相同，perf
+子系统需要有一个公共的抽象以支持各种不同的PMU，3. 很多时候我们只是统计一个进程的
+数据，而Linux是一个多进程系统，这就需要perf子系统对数据统计进行控制，比如，程序
+运行时开始统计，程序调度出去时停止统计，这种控制可能是比较复杂的，比如进程在不同
+核之间迁移的时候，进程数据的统计也要跟着一起迁移，4.为了方便用户使用，需要提供
+相应的用户态工具，发送perf命令，解析perf数据。
+
+## perf用户态工具
+
+perf用户态工具的代码在Linux内核tools/perf目录下，其实是可以独立内核编译的用户态
+工具。用户态工具的基本逻辑比较简单，一般在主进程里完成命令解析和相关配置，创建
+子进程运行被测程序，主进程通过perf_event_open/ioctl等接口配置和控制perf寄存器，
+主进程完成perf寄存器控制和子进程启动等同步操作，最后主进程还要解析和展示数据。
+
+我们具体看下perf stat的代码逻辑要点:
+```
+ /* tools/perf/perf.c */
+ main
+   +-> run_argv
+     +-> handle_internal_command
+       +-> run_builtin
+             /* builtin-stat.c */
+         +-> cmd_stat (p->fn)
+           +-> run_perf_stat
+             +-> __run_perf_stat
+                   /* 里面fork出子进程，阻塞等待父进程 */
+               +-> evlist__prepare_workload
+                   /* 一路调用下去，最后使用perf_event_open系统调用创建counter */
+               +-> create_perf_stat_counter
+                   /* 一路调用下去, 使用ioctl enable counter */
+               +-> enable_counters
+                   /* 启动子进程 */
+               +-> evlist__start_workload
+```
+
+man perf_event_open可以查看该系统调用的具体参数，我们可以跟踪下一个perf_event具体
+是怎么被映射到底层的PMU counter上的。
+
+perf_event_open的入参是这样的：
+```
+int perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu, int group_fd,
+                    unsigned long flags);
+```
+基本逻辑是pid和cpu控制要跟踪的进程和CPU，group_fd可以支持同时跟踪一组event，具体
+要跟踪的事件在attr里定义。
+
+attr是一个大杂汇，内核通过attr.type/attr.config定义具体的event，公共的event有对应
+的type/config的定义，硬件厂商子定义的event使用PERF_TYPE_RAW作为type，attr.size定义
+这个结构体的大小，各个版本的perf_event_open的attr的size可能是不一样的，这里应该
+是只传递指针和size，靠这种方法做接口的演进。
+
+## perf内核构架
+
+### 核心构架
+
+perf系统调用入口：
+```
+ /* linux/kernel/events/core.c */
+ perf_event_open
+       /* 注册给task_struct */
+   +-> perf_install_in_context
+```
+perf_event_open根据用户指令的event，在PMU硬件上分配具体的counter(这里只考虑硬件
+event的情况)，并把对应的event向task_struct注册，task_struct里用perf_event_context
+记录和当前线程相关的event，这里把event和task_struct绑定是为了后续在线程调度的时候
+停止和重启具体event的计数。perf_event_open生成匿名文件，并返回对应fd，随后用户通过
+fd控制对应的event。
+
+perf ioctl入口：
+```
+ /* linux/kernel/events/core.c */
+ perf_ioctl
+   +-> ...
+```
+
+Linux调度进程，把一个进程投入运行，相关的counter也要投入运行，调用路径估计是：
+```
+ /* linux/kernel/events/core.c */
+ __perf_event_task_sched_in
+   +-> perf_event_context_sched_in
+     +-> perf_event_sched_in
+       +-> ctx_sched_in
+         +-> ctx_groups_sched_in
+           +-> pmu_groups_sched_in
+             +-> merge_sched_in
+               +-> group_sched_in
+                 +-> event_sched_in
+```
+可以看到event_sched_in将调用具体PMU的add回调函数，把event加回来。这里的整体逻辑是
+线程被调度出CPU之前使用__perf_event_task_sched_out暂停event的行为并保存当前统计值，
+线程被重新调度进CPU的时候使用如上的__perf_event_task_sched_in恢复event的上下文并
+重新开始event的运行。
+
+底层的具体操作在PMU驱动的add/del回调函数中完成，其中既控制PMU counter的启停，又
+恢复/保存counter的值到event上下文。
+
+### PMU驱动
+
+我们以ARM PMUv3驱动为例分析，看看具体硬件怎么和perf核心构架连在一起。其中核心逻辑
+就是Linux为PMU硬件抽象了一个struct pmu数据结构，各个PMU驱动要实现pmu数据结构里
+perf_event的控制逻辑，并把自己的pmu注册到perf子系统上。
+```
+ /* linux/drivers/perf/arm_pmuv3.c */
+ armv8_pmu_device_probe
+       /* 在其中创建struct pmu，并添加ARM PMUv3的各种回调函数 */
+   +-> armpmu_alloc
+   +-> armpmu_register
+```
+
+PMU驱动的另一个重要功能是注册了PMU中断处理函数，PMU中断处理函数处理具体counter
+的溢出中断，调用perf子系统API记录中断发生时的程序上下文数据。
+
+## TopDown模型
+
+使用TopDown模型分析程序性能是Intel提出的一种程序性能分析方法，如上使用一组counter
+分析程序性能问题并不能系统的看问题，TopDown的方式可以系统的分析程序的性能问题。
+
+简单讲，通过perf记录输出的一组程序运行参数，可以得到CPU在运行这段程序时，CPU上
+cycle的分布情况，这个分布情况可以从上到下的逐步细分，最后定位到具体是哪里的问题。
+
+Linux系统上已经支持使用perf直接得到TopDown结果，ARM64上目前还没有厂家可以做到。
+相关的信息可以参考[这里](https://wangzhou.github.io/现代CPU性能分析与优化-笔记/)。
+
+## ARM PMU扩展特性
+
+- SPE
+
+- uncore PMU
