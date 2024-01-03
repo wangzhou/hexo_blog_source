@@ -3,6 +3,7 @@ title: Linux perf构架分析
 tags:
   - Linux内核
   - 软件性能
+  - perf
 description: 本文分析Linux上perf子系统的基本逻辑，分析基于的内核版本是v6.7-rc6，分析基于 ARM64架构和RISCV构架。
 abbrlink: 33051
 date: 2023-12-28 19:47:28

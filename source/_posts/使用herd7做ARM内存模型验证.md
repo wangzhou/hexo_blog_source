@@ -2,7 +2,8 @@
 title: 使用herd7做ARM内存模型验证
 tags:
   - ARM64
-  - 内存模型，herd
+  - 内存模型
+  - herd
 description: 本文介绍使用herd7做ARM内存模型验证的基本逻辑。
 abbrlink: 64990
 date: 2023-11-14 08:32:39
