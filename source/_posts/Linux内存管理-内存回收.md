@@ -1,0 +1,198 @@
+---
+title: Linux内存管理-内存回收
+tags:
+  - 内存管理
+  - Linux
+description: >-
+  本文总结Linux内核里内存回收的基本逻辑，PLKA在第18章介绍了这部分内容，文本的
+  分析参考了PLKA的相关介绍，基于内核v6.7-rc6做代码分析。总的看新内核在内存回收
+  核心逻辑上变化不大，但是新加了比如folio/damon/multi-gen LRU等特性。
+abbrlink: 33687
+date: 2024-01-20 10:20:37
+categories:
+---
+
+
+
+基本逻辑
+---------
+
+Linux系统上的虚拟内存管理和物理内存管理的逻辑是相对正交的，我们这里提到的内存回收
+指的物理内存管理的逻辑。
+
+从一个具体的例子做下理解，用户态调用一个munmap断开VA->PA映射和这个PA对应的物理页面
+释放回伙伴系统的逻辑是正交的。
+
+实际上，虚拟地址是对用户态承若的语意，内核只承诺了最基本的虚拟地址保存数据的功能，
+当访存指令在用户态访问虚拟地址上的数据时，内核保证用户态可以访问到正确的数据，其中
+可能直接访问到数据，也可能访问的物理页面不在内存，内核负责把数据给到用户态，一般
+的逻辑是在异常处理中加载物理页面，并把PC返回到出问题的访存指令，重新执行访存指令。
+从用户态的角度看，异常发生时访存指令停在了那里，随后继续执行完成访问虚拟地址的行为，
+用户态并不感知内核中物理页面管理的行为。
+
+所以，断开VA->PA映射，比如munmap中，并不会直接释放物理页面，这个过程只会改动物理
+页面相关的反向映射以及LRU数据。
+
+内核使用LRU链表维护使用中的物理页面的冷热信息，每个NUMA节点有独立的一组LRU链表，
+并且依据文件页/匿名页/active/inactive的不同组合形成4个LRU链表，再加上一个不可回收
+的LRU链表(unevitable)，一个NUMA节点有5个LRU链表。
+
+LRU的转换使用了类似硬件分支预测里的两位饱和计数器的思路做active和inactive之间的
+状态转换。内核从inactive LRU链表上回收物理内存。
+
+struct folio中的PG_referenced, PG_active是对应的“两位”，状态转移逻辑：
+```
+ inactive           inactive         active             active  
+ unreferenced       referenced       unreferenced       referenced
+```
+2021年Linux kernel Plumber上这篇文章："Overview of Memory Reclaim in the Current Upstream Kernel"，
+对LRU list上的页面状态转换逻辑有很好的梳理。我们在这里简单整理下：
+
+PG_active表示当前folio在active还是inactive LRU上，一般一个folio最开始分配出来
+的时候是在inactive LRU上，PG_referenced是unreferenced(后面就用active/inactive/
+referenced/unreferenced表示对应的状态)，后续如果这个folio被访问到，CPU硬件会写
+对应页表项上的access bit，内核在reclaim的流程里检测到页表项的access bit被置1，会
+更新folio中的状态更新到referenced，此时folio依然在inactive LRU上，注意这个检测
+referenced的流程以后会把页表项的access bit清理掉，这个是为下次访问时硬件置1做好
+准备，referenced检测的具体代码在folio_referenced函数里。所有状态的切换逻辑依此类推，
+可能存在特殊的转换情况，总体上看，内核会double check下物理页的访问情况，再决定在
+active/inactive LRU链表上做移动。
+
+我们从上层看下触发状态切换的入口点在哪里。首先，内核在分配物理页面的时候(alloc_pages)，
+如果伙伴系统的内存不足，就会触发内存回收；内核线程kswapd会检测系统中的物理内存是否
+低于给定的水线，并在低于水线的时候启动内存回收；damon子系统新家的kdamond内核线程，
+会根据sysfs中的配置进行相关的检测或内存回收。
+
+显然，调整folio在LRU上的相关状态和做物理页面回收是两个正交的逻辑，状态调整需要
+具有一定的实时性，页面回收可以在可用内存少的时候再进行。
+
+状态调整需要不断的清理PTE上的access bit，然后观察物理页的访问情况，相关逻辑的开销
+还不能大。如上分析的，对于kswapd和alloc_pages慢速路径中的页面回收，是在内存使用
+低于一定水线进行的，实际上是把冷热内存检测调整和物理内存回收这两个相对正交的逻辑
+放到了一起，冷热内存的检测看起来会不准。
+
+damon子系统可以根据用户配置主动进行冷热页检测，这个似乎作用要好点。
+
+对于通用物理页面的回收逻辑，我们放到下面的代码分析中。根据页面具体回收方式，
+不同情况有不同的处理: 1. 不需要保存直接回收(缓存/没有用的内存/OOM)；2. 需要保存
+(保存回backend文件/匿名页swap到swap分区/shrink)。
+
+代码分析
+---------
+
+分配物理页面时，在慢速路径里触发内存回收的逻辑如下：
+```
+alloc_pages
+  ...
+  +-> __alloc_pages_slowpath
+    +-> __alloc_pages_direct_reclaim
+      +-> __perform_reclaim
+        +-> try_to_free_pages
+          +-> do_try_to_free_pages
+            +-> shrink_zones
+              +-> shrink_zone
+                +-> shrink_zone_memcgs // 牵扯memory cgroup的逻辑
+                  +-> shrink_lruvec 
+                    +-> shrink_list
+```
+shrink_list里先做shrink_active_list再做shrink_inactive_list，前者把active LRU中
+的冷页移动到inactive LRU，后者对inactive LRU里的冷页做回收操作。
+
+kswapd的内核线程做内存回收的逻辑如下：
+```
+/* 入口在mm/vmscan.c的kswapd_init函数，一个NUMA node会对应一个kswapd线程 */
+kswapd
+      /* todo: 分析这里水线相关的逻辑 */
+  +-> balance_pgdat
+    +-> kswapd_shrink_node
+      +-> shrink_node
+```
+
+damon内核线程(kdamoned)做内核回收的逻辑需要在单独文档里展开。
+```
+damon/paddr.c -> reclaim_pages -> reclaim_folio_list -> shrink_folio_list
+```
+
+各种page fault中也会把对应的页加入LRU，这里只关注和LRU相关的逻辑。
+```
+handle_pte_fault
+
+  +-> do_pte_missing
+        /* 看起来只会加到本cpu的LRU缓存里，什么时候加入全局LRU链表? 加入什么LRU */
+    +-> folio_add_lru_vma
+      +-> folio_add_lru
+
+      /* 没有看明白swap的具体逻辑 */
+  +-> do_swap_page
+      
+      /* numa balance里用的page fault，没有看到和LRU有关系的地方 */
+  +-> do_numa_page
+
+      /* wp是write protect的意思，这个处理COW的情况，逻辑更复杂 */
+  +-> do_wp_page 
+    +-> wp_page_copy
+      +-> folio_add_lru_vma
+        +-> folio_add_lru
+```
+
+shrink_active_list以及shrink_inactive_list基本逻辑分析如下:
+```
+/*
+ * 入参有：这一次扫描的页数(nr_to_scan), lruvec, 针对一个page做rmap_walk的控制
+ * 参数(struct scan_control)。
+ */
+shrink_active_list
+      /* 每次都是从active LRU的尾部开始，最大摘出nr_to_scan个folio */
+  +-> isolate_lru_folios
+    +-> trace_mm_vmscan_lru_isolate
+      /*
+       * 对于隔离出来的folio，一般都做如下处理。folio_referenced得到folio被引
+       * 用的次数，对于引用非0，并且是代码段的folio，把它重新加回active LRU，
+       * 其它的情况加到inactive LRU里。这里引用的含义有点模糊，从代码上看，含义
+       * 是folio->mapcount，但是在contend时，返回rmap_walk时计算得到的referenced。
+       * 不理解这里的意思？
+       */
+  +-> folio_referenced
+        /* 反向映射的API，找到一个folio对应的vma，并调用sc传入的回调函数 */
+    +-> rmap_walk
+          /* 针对每个反向映射中找见的vma，都用folio_referenced_one处理下 */
+      +-> folio_referenced_one
+        +-> page_vma_mapped_walk
+          +-> ptep_clear_flush_young_notify
+                /* 体系结构相关的代码在这里清掉页表项上的access bit */
+            +-> ptep_clear_flush_young
+```
+inactive LRU处理的逻辑和如上active LRU的类似，不过增加了很多页表回收的逻辑。
+```
+shrink_inactive_list
+  +-> isolate_lru_folios
+      /*
+       * 这个函数是inactive LRU上页做回收的核心函数, alloc_pages/alloc_contig_pages/
+       * damon中都有调用。
+       *
+       * TODO: 内容太多了...
+       * 
+       * 注意: folio_test_xxx/folio_set_xxx/folio_get_xxx等，以及PG_xxx比如
+       *       PG_active/PG_young之类均定义在include/linux/page-flags.h。
+       */
+  +-> shrink_folio_list
+    +-> folio_check_referenced 
+      +-> folio_referenced
+```
+
+madvise系统调用也可以触发内存回收:
+```
+do_madvise
+  +-> madvise_vma_behavior
+    +-> madvise_cold/madvise_pageout
+      +-> madvise_cold_or_pageout_pte_range
+        +-> reclaim_pages
+```
+
+分配连续物理内存的alloc_contig_pages里也会尝试做内存回收:
+```
+/* page_alloc.c */
+alloc_contig_pages
+  +-> reclaim_clean_pages_from_list
+    + -> shrink_folio_list
+```
