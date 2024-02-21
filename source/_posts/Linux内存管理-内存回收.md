@@ -2,7 +2,7 @@
 title: Linux内存管理-内存回收
 tags:
   - 内存管理
-  - Linux
+  - Linux内核
 description: >-
   本文总结Linux内核里内存回收的基本逻辑，PLKA在第18章介绍了这部分内容，文本的
   分析参考了PLKA的相关介绍，基于内核v6.7-rc6做代码分析。总的看新内核在内存回收
