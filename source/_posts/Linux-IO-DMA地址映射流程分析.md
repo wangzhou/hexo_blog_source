@@ -13,7 +13,7 @@ abbrlink: eecc1f14
 date: 2021-06-27 23:17:20
 ---
 
-1. SMMU页表以及相关配置的初始化流程
+SMMU页表以及相关配置的初始化流程
 -----------------------------------
 
  iommu_ops里的attach_dev回调用来在SMMU一侧为master设备建立各种数据结构。如下是
@@ -55,7 +55,7 @@ arm_smmu_attach_dev
   +-> arm_smmu_install_ste_for_dev
 ```
 
-2. map流程分析
+map流程分析
 --------------
 
  我们从内核DMA API接口向下跟踪，观察dma内存的申请和map的流程。以dma_alloc_coherent
@@ -143,7 +143,7 @@ arm_smmu_attach_dev
  __arm_lpae_map的实现比较直白，就是递归的创建页表。完全按照上层给的page或者block
  的map来做页表映射。
 
-3. 页表相关的细节
+页表相关的细节
 -----------------
 ```
       level              0       1        3        3

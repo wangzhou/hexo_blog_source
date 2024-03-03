@@ -1,0 +1,116 @@
+---
+title: Linux内存管理-NUMA_balance中的内存迁移
+tags:
+  - Linux内核
+  - 内存管理
+description: >-
+  本文分析Linux内核里内存迁移的基本逻辑，内核中有很多地方要使用内存迁移，本文 聚焦在NUMA
+  balance中引起的内存迁移。分析使用的内核版本是6.8-rc5。
+abbrlink: 11818
+date: 2024-03-03 20:51:55
+categories:
+---
+
+基本逻辑
+---------
+
+在NUMA系统上，不同CPU和内存之间的距离不同，为了提高系统性能，Linux内核里会进行所谓
+的NUMA balance，它的目的是动态的调整程序运行的CPU或者程序使用的内存，使得CPU和内存
+尽量在一个NUMA域里。
+
+对于内存的调整，内核会周期性的断开VA到PA的页表映射，这样当访问内存时就会触发缺页
+异常，内核在处理缺页异常时进行必要的内存迁移。
+
+需要注意的是，打开NUMA balance后，内核一定会周期性的断开VA到PA的映射，对于不需要
+做内存迁移的情况，内核把页表重新配置好，这个开销相对来说是比较小的。
+
+另外，内核的调度子系统还会在所有核之间做线程的负载均衡，就是根绝每个核的负载情况，
+在核之间迁移线程。本文讨论的不是这个主题，而是发现线程使用的内存和线程不在一个
+NUMA节点时，把内存迁移到线程当前所在的NUMA节点。
+
+代码分析
+---------
+
+知乎上的[这篇](https://zhuanlan.zhihu.com/p/635383566)文章对NUMA balance的代码分析的已经很好了。
+
+这里再次整理下代码。NUMA balancing的代码放在调度子系统代码目录下，关于Linux调度
+的基本逻辑可以参考[这里](https://wangzhou.github.io/Linux内核调度的基本逻辑/)，其中的代码分析已经可以看到NUMA balancing的相关代码。
+我们这里把NUMA balancing的逻辑单独挑出来看下。测试NUMA balancing需要打开内核编译
+选项CONFIG_NUMA_BALANCING。
+
+创建线程的时候初始化线程NUMA balancing的相关内容。
+```
+fork/clone系统调用
+  +-> copy_process
+    +-> sched_fork
+      +-> __sched_fork
+        +-> init_numa_balancing
+
+/* 初始化相关控制和统计参数 */
+init_numa_balancing
+      /* 把NUMA balancing扫描页断开页表的函数放到task_struct里 */
+  +-> init_task_work(&p->numa_work, task_numa_work)
+```
+
+时钟中断里触发NUMA balancing运行。
+```
+/* linux/kernel/sched/core.c */
+scheduler_tick
+  +-> curr->sched_class->task_tick // CFS上是task_tick_fair
+    ...
+        /* 可以看到目前只在CFS里支持了NUMA balancing */
+    +-> task_tick_numa
+          /*
+           * 把task_struct里保存的task_numa_work保存到task_struct->task_works，
+           * 注意, 如下动作只在时间到达numa_next_scan时才进行。根据注释可以知道
+           * task_work_add + TWA_RESUME会触发task_struct对应线程在返回用户态或
+           * guest之前先执行下task_numa_work。
+           */
+      +-> task_work_add
+        +-> set_notify_resume(task)
+          +-> test_and_set_tsk_thread_flag(task, TIF_NOTIFY_RESUME)
+          +-> kick_process(task)
+                /*
+                 * 一般实现为一个IPI，这块逻辑不清楚？反正我们可以认为task_numa_work
+                 * 最终会在对应线程返回用户态之前被调用下。
+                 */
+            +-> smp_send_reschedule(cpu)
+      /* 这个是线程在cpu核之间的负载均衡逻辑 */
+  +-> trigger_load_balance
+    +-> if (time_after_eq(jiffies, rq->next_balance))
+          raise_softirq(SCHED_SOFTIRQ);
+```
+
+task_numa_work的基本逻辑。task_numa_work根据配置的扫面间隔时间、一次扫描内存大小
+以及需要扫描的区域，进行内存扫描，断开对应物理页的页表。
+```
+task_numa_work
+      /* numa_scan_period是扫描的间隔时间 */
+  +-> next_scan = now + msecs_to_jiffies(p->numa_scan_period)
+  +-> try_cmpxchg(&mm->numa_next_scan, &migrate, next_scan))             
+      /*
+       * 一次扫描的内存数，默认是256MB, debugfs sched/numa_balancing/scan_size_mb
+       * 可以配置。
+       */
+  +-> pages = sysctl_numa_balancing_scan_size
+      /* 在这之前先排除一堆不需要做扫描的情况 */
+  +-> change_prot_numa(vma, start, end)
+    +-> change_protection(&tlb, vma, addr, end, MM_CP_PROT_NUMA)
+    ...
+```
+
+NUMA balancing相关的缺页处理逻辑。
+```
+/* linux/mm/memory.c */
+handle_pte_fault
+  +-> if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
+        return do_numa_page(vmf)
+
+do_numa_page
+      /* 检查是不是在相同NUMA node上 */
+  +-> target_nid = numa_migrate_prep(folio, vma, vmf->address, nid, &flags)
+      /* 如果cpu和内存不在一个NUMA node，才做内存迁移 */
+  +-> migrate_misplaced_folio(folio, vma, target_nid)
+      /* 在一个NUMA node上就直接把pte变成有效 */
+  +-> out_map: ....
+```

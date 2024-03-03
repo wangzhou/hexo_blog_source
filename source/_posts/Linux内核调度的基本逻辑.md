@@ -1,0 +1,305 @@
+---
+title: Linux内核调度的基本逻辑
+tags:
+  - Linux内核
+  - 调度
+description: >-
+  本文分析Linux内核调度的基本逻辑，分析使用的内核版本是6.8-rc5，使用的qemu 模型是v7.0.0,
+  硬件构架基于riscv。分析过程重点看下CFS调度。
+abbrlink: 24491
+date: 2024-03-03 20:50:37
+categories:
+---
+
+调度要解决的问题
+-----------------
+
+多个线程使用时分复用的方式分享一个CPU core，怎么时分复用。在多核系统下，如何把各
+个线程合理的分配到各个核上，这些都是调度要解决的问题。
+
+不同的线程有不同的属性，有的是CPU密集的，有的是IO密集的，有的优先级比较高，调度
+器需要尽可能的满足这些需求。
+
+调度的单位有时不只是线程，比如，一个台机器上，还可以限制不同用户对CPU资源的使用
+情况，这个也需要调度器参与。
+
+总体上，调度就是根据各种需求，动态的决定CPU资源给谁使用。
+
+调度基本逻辑
+-------------
+
+内核里并没有一个固定的点执行全部调度行为，各个执行调度的点散落在内核的各个部分。
+调度的逻辑根据系统运行状态进行调度，这些运行状态大概包括：线程的优先级，线程的
+运行时间，CPU的负载等等。调度的逻辑抽象出几个调度类: fair_sched_class, rt_sched_class,
+dl_sched_class, idle_sched_class等，每个线程和特定的调度类关联，调度类定义的是
+具体的调度行为，比如，fair_sched_class(完全公平调度器类)得到的调度行为表现为使用
+这种调度的各个线程尽可能公平的使用CPU，而rt_sched_class(实时调度器类)强调的是使用
+这种调度器的各个线程不能长时间得不到调度，在规定的时间内，总会都执行下各个线程。
+
+单核上和多核上的调度行为都会依赖负载(load)特点。比如，系统中的线程要尽可能的平均
+的分布在系统中的各个核上，首先就需要有一定的手段度量各个核的负载。这里的核可以泛
+化到调度组/调度域。调度器根据负载特点，调度各个调度实体占据CPU执行。需要注意的是
+内核代码里多次用到load这个词，有的意思是这里所说的负载，有的则是由线程优先级折算
+而来的线程权重。
+
+线程可以不断的在系统中的各个核上迁移，这里就涉及到迁移的时间点、需要进行迁移条件
+以及具体的线程迁移逻辑。
+
+我们先分析调度子系统相关的数据结构。首先应该具有per-cpu的就绪队列和等待队列，就
+绪队列里的线程都具有执行条件，但是CPU在一个时间只能运行一个线程，所以把就绪的线
+程放到对应排队，等待队列中的线程等待满足运行的条件。线程的主要状态为运行(running)/
+可中断睡眠和不可中断睡眠。(可中断睡眠是什么行为?)
+
+调度器在需要调度一个线程运行时就从绪队列中挑选一个线程运行，运行中的线程需要等待
+资源的时候，可以把自己放到等待列。调度器只在就绪队列上挑选线程执行，所谓等待队列，
+其实是散布在各个子系统里的，当线程需要sleep时，线程把自己加入特定的等待队列，满
+足唤醒条件时，其它上下文(一般是对应的中断处理)把等待队列中的线程重新加到就绪队列
+参与调度，内核里的wait_for_completion/complete正是一个这样的例子。runnning状态的
+线程，使用schedule调度，被换下来的线程还在就绪队列里?
+
+对于如上的调度class，内核按照优先级从高到低的顺序依此调用其中对应的调度回调函数，
+rt和dl排在fair之前，但是系统中绝大多数线程属于fair调度。
+
+线程可以主动放弃CPU，从而触发调度，也可以在中断或系统调用返回时触发调度。系统中
+还有周期性的时钟中断触发对应的调度行为。一个相关的逻辑是，调度子系统会控制调度行
+为，使得在一定的时间内所有线程都得到调度，但是当线程数很多时，强行保证这个逻辑会
+使得调度的频率太高，系统做有用功的时间就减少了，所以，当就绪队列上线程太多时，系
+统会保证一个线程每次至少运行一段时间再做切换。
+
+下面我们看下CFS的基本逻辑，CFS的基本逻辑是在调度的时候找到最少运行时常的线程，把
+这样的线程投入运行，因为等待IO的线程运行时间会小，那么当睡眠等待IO的线程由于条件
+满足被放到就绪队列里时，这样的线程往往运行时间较小，最先得到调度。这样CFS既可以
+使得各个线程的运行时间尽量均等，又可以满足IO密集型线程优先调度的需求。
+
+但是如上的逻辑没有把线程优先级考虑在内，首先线程优先级刻画的到底是什么？我们可以
+把线程优先级理解成线程使用CPU的时间大小，高优先级的线程容许占据更多的CPU时间。那
+么，我们给高优先级的线程的运行时间乘以一个小的系数，作为高优先级线程的虚拟运行时
+间，尽量使各个进程的虚拟运行时间相等，这样当各个线程的虚拟运行时间相等时，高优先
+级线程的实际运行时间是多于低优先级线程的。
+
+代码实现分析
+-------------
+
+调度子系统初始化的入口如下：
+```
+start_kernel
+  +-> sched_init
+    +-> init_sched_fair_class
+```
+
+```
+/* 静态定义per-cpu的struct rq数据结构 */
+DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues)
+```
+
+新线程/进程和调度子系统建立联系逻辑如下：
+```
+fork/clone系统调用
+  +-> copy_process
+        /* 创建新进程时，使得新进程和调度子系统关联起来 */
+    +-> sched_fork
+          /* 线程里调度entity初始化*/
+      +-> __sched_fork
+            /* numa balancing初始化(内存随线程迁移) */
+        +-> init_numa_balancing
+          /* 根据优先级确定线程的调度类 */
+      +-> p->sched_class = &fair_sched_class/&rt_sched_class
+          /* 初始化线程的平均负载 */
+      +-> init_entity_runnable_average
+    ...
+    +-> sched_cgroup_fork
+          /* CFS class里的task_fork回调函数task_fork_fair */
+      +-> p->sched_class->task_fork
+            /* CFS里更新vruntime之类运行参数的核心函数 */
+        +-> updata_curr
+        +-> place_entity
+```
+
+我们拿wait_for_completion/complete作为一个主动释放CPU触发的调度示例, 可以看到
+wait_for_completion把线程改成不可中断睡眠态，放入自己的等待队列，然后进行调度。
+complete针对等待队列中保存的task调用try_to_wake_up唤醒线程，可以看到这个过程会
+选择线程被唤醒后运行的CPU。
+```
+/* linux/kernel/sched/completion.c */
+wait_for_completion
+  +-> wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE)
+    ...
+    +-> schedule_timeout
+
+complete
+  +-> swake_up_locked(&x->wait, ...)
+    +-> try_to_wake_up(task, TASK_NORMAL, ...)
+          /* 选择在哪个核上运行唤醒的线程 */
+      +-> select_task_rq()
+          /* ttwu是try to wake up的缩写 */
+      +-> ttwu_queue()
+        +-> ttwu_do_activate()
+              /* 添加到对应的就绪队列里 */
+          +-> activate_task()
+              /* 把对应就绪队列里当前正在运行的线程设置TIF_NEED_RESCHED标记 */
+          +-> wakeup_preempt()
+```
+不管是线程主动调度还是被动调度，最终执行调度的点都是schedule_xxx。如上可以看出内
+核抢占的实现逻辑是，抢占线程把自己放到对应的就绪队列里，然后配置就绪队列里正在执
+行的线程的TIF_NEED_RESCHED标记，然后就是等待调度点的来临。
+
+我们看下各种触发调度的时间点，线程主动调用schedule_xxx，一定会发生调度行为，但是
+被动调度路径上的schedule_xxx的执行点要分关闭内核抢占和打开内核抢占的情况分别看待,
+我们这里重点分析被动调度的点。
+
+所谓内核抢占，是指线程打断内核执行流程，抢占CPU资源执行的行为。支持内核抢占是为
+了提高整个系统的实时性，使得CPU在执行内核代码的时候有机会去执行其它线程。内核抢
+占发生的时间点有两个，一个是开启内核抢占(preempt_enable)的时候，支持内核抢占并不
+是在内核的任何位置都可以发生抢占，内核中禁止抢占的位置会用preempt_disable和
+preempt_enable控制，所以preempt_enable从新打开抢占时，有必要检查下是否需要重新调
+度; 第二个地方是内核被中断打断，中断执行完后，恢复内核继续执行的时候，注意这里是
+恢复内核执行的时候。
+
+用户程序执行时被中断打断以及发生系统调用，中断或者系统调用返回用户态时，会进行下
+调度，这个应该是开关内核抢占都会进行的。
+
+继续看下具体调度逻辑，这里侧重分析CFS调度的逻辑。
+```
+/* linux/kernel/sched/core.c */
+schedule
+  +-> __schedule 
+    +-> update_rq_clock
+          /* 各个时间的概念是什么：rq->clock? */
+      +-> update_rq_clock_task
+        /*
+         * 从rq里挑出下一个要运行的程序，并更新调度相关的信息。怎么和CFS结合到
+         * 一起?
+         *
+         * rq里的各个域段的含义?
+         */
+    +-> next = pick_next_task // CFS里的回调是__pick_next_task_fair
+          /*
+           * 这里do-while的逻辑和sched group有关系，如果没有sched group，这里
+           * 的循环只会执行一次。
+           */
+      +-> do {
+            if (curr) { // sched_entity
+              if (curr->on_rq)
+                /* 更新vruntime等调度参数 */
+                update_curr(cfs_rq)
+                  +-> delta_exec = update_curr_se()
+                        /*
+                         * 这里是当前时间减去上次更新vruntime时的时间，update_curr
+                         * 这个函数在很多地方都会调用，如果上次调用是在离开就绪
+                         * 队列，其中睡眠了很久，再次调度的时候计算出的vruntime
+                         * 就是包换睡眠的vruntime，这里没有理解？
+                         */
+                    +-> delta_exec = now - curr->exec_start
+                  +-> curr_vruntime += calc_delta_fair(delta_exec, curr)
+              else
+                curr = NULL
+            }
+            se = pick_next_entity(cfs_rq)
+            cfs_rq = group_cfs_rq(se)
+          } while (cfs_rq)
+    +-> clear_tsk_need_resched(prev)
+    +-> clear_preempt_need_resched()
+    +-> context_swith(rq, prev, next, &rf)
+```
+再调用这个函数之前，先把当前线程状态切换到睡眠状态，并把当前线程挂到对应的等待队
+列里。
+
+内核里会有周期性的timer中断产生，timer中断被触发后最终调用到tick_handle_periodic
+函数，具体的调用逻辑可以参考[这里](https://wangzhou.github.io/riscv-timer的基本逻辑)。
+
+tick_handle_periodic中执行调度相关的逻辑，基本逻辑如下，下面我们从sched_tick看起。
+```
+tick_handle_periodic
+  +-> tick_periodic
+    +-> update_process_times
+      +-> scheduler_tick
+
+/* linux/kernel/sched/core.c */
+scheduler_tick
+  +-> curr->sched_class->task_tick // CFS上是task_tick_fair
+    +-> entity_tick
+      +-> update_curr
+      +-> update_load_avg
+      +-> update_cfs_group
+    +-> task_tick_numa
+      +-> task_work_add
+  +-> trigger_load_balance
+```
+没有找见时间片用完触发调度的流程?
+
+看下如何获取调度相关的系统统计值。打开内核配置CONFIG_SCHEDSTATS和CONFIG_SCHED_DEBUG，
+在/proc/schedstat，/proc/<pid>/schedstat，/proc/<pid>/sched以及/sys/kernel/debug/sched
+下会有调度相关的统计信息。
+
+注意，如下proc目录下的信息对应的内核配置打开了：CONFIG_SMP/CONFIG_NUMA/
+CONFIG_NUMA_BALANCING，系统为8核2个NUMA节点的qemu虚拟机。
+```
+# cat /proc/schedstat 
+version 15
+timestamp 4294957192
+cpu0 0 0 0 0 0 0 3497941200 72601200 885
+domain0 0f 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu1 0 0 0 0 0 0 864923200 177376300 627
+domain0 0f 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu2 0 0 0 0 0 0 244215700 34767400 195
+domain0 0f 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu3 0 0 0 0 0 0 850674400 210114600 1525
+domain0 0f 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu4 0 0 0 0 0 0 949585300 93530900 802
+domain0 f0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu5 0 0 0 0 0 0 1165469200 61998000 384
+domain0 f0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu6 0 0 0 0 0 0 926069500 33696600 332
+domain0 f0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+cpu7 0 0 0 0 0 0 499869900 69649400 119
+domain0 f0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+domain1 ff 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+
+# pwd
+/proc/161
+# cat schedstat 
+1183535400 9710600 332
+# cat sched
+sh (161, #threads: 1)
+-------------------------------------------------------------------
+se.exec_start                                :        361733.721400
+se.vruntime                                  :          1293.810224
+se.sum_exec_runtime                          :          1205.758900
+se.nr_migrations                             :                    0
+nr_switches                                  :                  339
+nr_voluntary_switches                        :                  326
+nr_involuntary_switches                      :                   13
+se.load.weight                               :              1048576
+se.avg.load_sum                              :                 9951
+se.avg.runnable_sum                          :             10191567
+se.avg.util_sum                              :              9795597
+se.avg.load_avg                              :                  217
+se.avg.runnable_avg                          :                  217
+se.avg.util_avg                              :                  208
+se.avg.last_update_time                      :         361733721088
+se.avg.util_est                              :                  208
+policy                                       :                    0
+prio                                         :                  120
+clock-delta                                  :                 1500
+mm->numa_scan_seq                            :                    0
+numa_pages_migrated                          :                    0
+numa_preferred_nid                           :                   -1
+total_numa_faults                            :                    0
+current_node=1, numa_group_id=0
+numa_faults node=0 task_private=0 task_shared=0 group_private=0 group_shared=0
+numa_faults node=1 task_private=0 task_shared=0 group_private=0 group_shared=0
+```
+```
+# mount -t debugfs none /sys/kernel/debug/
+# ls /sys/kernel/debug/sched/
+base_slice_ns      latency_warn_ms    nr_migrate         verbose
+debug              latency_warn_once  numa_balancing
+features           migration_cost_ns  tunable_scaling
+```
