@@ -4,9 +4,9 @@
 
 # Site
 title: Sherlock's blog
-subtitle: '宗教般的信仰，初恋般的热情'
-description: 'Linux, kernel, 计算机体系结构'
-keywords: Linux, kernel, 计算机体系结构
+subtitle:
+description: 'Linux, Kernel, 计算机体系结构'
+keywords: Linux, Kernel, 计算机体系结构
 author: Sherlock Wang
 language: zh-CN
 timezone: 'Asia/Shanghai'
