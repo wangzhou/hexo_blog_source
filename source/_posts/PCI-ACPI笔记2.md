@@ -3,6 +3,7 @@ title: PCI ACPI笔记2
 tags:
   - UEFI
   - ACPI
+  - PCIe
 description: '本文以一个例子介绍和PCI相关的一些ACPI表格, 本文基于ARM64平台'
 abbrlink: 10b921
 date: 2021-07-11 23:39:26
