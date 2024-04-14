@@ -31,7 +31,13 @@ date: 2021-06-19 09:43:55
  行完线程函数后自己会退出，这其中也包括线程函数自己调用pthread_exit把自己结束。
  线程也可以被进程中的其他线程取消，取消一个线程使用的函数是：pthread_cancel(pthread_t tid)。
  用strace跟踪下，可以发现pthread_cancel中的系统调用是tgkill(tgid, tid, SIGRTMIN),
- 这个系统调用向线程组tgid里的tid线程发送SIGRTMIN信号。
+ 这个系统调用向线程组tgid里的tid线程发送SIGRTMIN信号。需要注意的是，pthread_cancel
+ 并不是同步的终止线程，而是给线程发送一个终止信号就返回，线程的终止行为还取决于
+ 线程自身的配置，首先线程自己可以配置是否响应pthread_cancel，默认情况下是可以响应
+ 的，可以通过pthread_setcancelstate配置这个状态。在这个基础上，线程需要在执行到
+ 一些特定的函数才能停下来，这些函数叫做取消点，通过pthread_setcanceltype可以配置
+ 对应的行为，PTHREAD_CANCEL_DEFERRED是在取消点cancel掉线程，默认是这样的配置，
+ PTHREAD_CANCEL_ASYNCHRONOUS是立即cancel掉线程。
 
  线程可以用pthread_jorn在阻塞等待相关线程结束，并且得到线程结束所带的返回值。
 
