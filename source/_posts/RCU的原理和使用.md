@@ -2,6 +2,7 @@
 title: RCU的原理和使用
 tags:
   - Linux内核
+  - 锁
 description: 本文描述RCU锁的基本原始和使用。详细代码分析需要合适的时机再补进来，太复杂了。
 abbrlink: 13350
 date: 2023-08-22 18:08:51
