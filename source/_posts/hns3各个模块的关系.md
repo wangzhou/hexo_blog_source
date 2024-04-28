@@ -2,7 +2,7 @@
 title: hns3各个模块的关系
 tags:
   - Linux内核
-  - 软件构架
+  - 软件架构
 description: 分析一个问题，这个问题和hns3有关系，这里分析下hns3各个模块的逻辑，以及主要 数据结构的逻辑。分析完全依赖Linux主线代码v6.8-rc5。
 abbrlink: 29971
 date: 2024-04-23 19:24:48
