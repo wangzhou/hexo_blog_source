@@ -1,0 +1,194 @@
+---
+title: ARM64系统寄存器总结
+tags:
+  - ARM64
+  - 计算机体系结构
+description: >-
+  本文总结ARM64系统寄存器的基本逻辑，我们从基本的CPU配置、中断异常逻辑、地址
+  翻译、时钟、GIC、SMMU以及虚拟化的逻辑出发，看看对应功能的基本系统寄存器。 本文重点看基础且重要的寄存器，重点是给一个整体的描述，具体功能需要在独立的
+  文档中总结。参考的ARM spec的版本是J.a。
+abbrlink: 24683
+date: 2024-05-08 08:52:25
+categories:
+---
+
+CPU基础配置/CPU特性位/CPU特性开关寄存器
+----------------------------------------
+
+一个CPU需要有对应的生产厂家、构架版本、支持特性、支持特性开关等的寄存器。
+
+GPR/中断异常/VMMA寄存器
+------------------------
+
+ARM64下有31个64bit通用寄存器(GPR)，其中x0-x29用作通用数据，x30时link register(lr)，
+5bit编码都是1时，表示0值。独立的SP寄存器，SP_ELx。独立的PC寄存器。
+
+中断和异常的时候需要各种系统寄存器支持。CPU状态寄存器PSTATE, 各个特权级就这一个
+统一的状态寄存器。
+
+中断异常时系统状态，SPSR_ELx。(save program status register)
+
+中断异常向量基地址，VBAR_ELx。(vector base address)
+
+中断异常原因，ESR_ELx。(exception syndrome register)
+
+中断异常PC，FAR_ELx。(fault address)
+
+中断异常返回地址，ELR_ELx。(exception link register)
+
+中断异常的路由控制，没有类似riscv上的逐个中断异常委托的机制，ARM上是整体定义和补
+充定义相结合的方式。
+
+各种中断的pending/enable控制，核一侧的控制只有FIQ/IRQ的统一开关，riscv上和这个不
+一样，核一侧分了外部中断/时钟中断/软件中断等的pending/enable控制寄存器。ARM上的
+SGI(软件中断)/PPI(主要给时钟用)/SPI、LPI(主要给外设用)相关寄存器定义到了GIC上，
+核一侧的系统寄存器在下面总结。
+
+页表基地址，TTBR0_ELx/TTBR0_Elx。(translation table base register)
+
+地址翻译控制，TCR_ELx。(translation control register)
+
+Timer相关寄存器
+----------------
+
+ARM spec的D11章节定义了generic timer，其定义主要分两个概念：system counter和timer。
+system counter是以一定频率增加的计数器，频率和计数器的数值分别记录在对应的寄存器
+里。在每个core上有timer相关的寄存器，分别有：1. CompareValue寄存器，当counter的
+值和CompareValue的值相等时触发timer中断(PPI)；2. 相关timer中断的控制寄存器；3.
+TimerValue寄存器，这个寄存器的值从大到小递减，减到0时触发timer中断。
+
+下面以EL1 physical counter-timer寄存器为例，罗列出相关的寄存器。
+```
+CNTFRQ_EL0，counter-timer frequency register。
+CNTPCT_EL0，counter-timer physical counter register。
+
+CNTP_CTL_EL0，counter-timer physical timer control register。
+CNTP_TVAL_EL0，counter-timer physical timer TimerValue register。
+CNTP_CVAL_EL0，counter-timer physical timer CompareValue register。
+```
+
+虚拟化相关寄存器
+-----------------
+
+我们分析支持VHE时，需要增加的系统寄存器。从软件的角度看，host/guest上的软件(包括
+内核)并不清楚它们是在host还是在guest，硬件的所有设计逻辑，需要在这个前提下都是成立
+的。
+
+在VHE打开时，guest用户态运行在EL0，guest内核态运行在EL1，host用户态运行在EL0，
+host内核态运行在EL2，hypervisor运行在EL2。和riscv虚拟化下各个软件的运行状态基本
+是一样的。
+```
+ +-----+          +-----+         +----+           +-----+
+ | EL0 |          | EL0 |         | VU |           |  U  |
+ +-----+          +-----+         +----+           +-----+
+    |                |               |                |   
+ +-----+             |            +----+              |   
+ | EL1 |             |            | VS |              |   
+ +-----+             |            +----+              |   
+    |                |               |                |   
+    |     +-----+    |               |     +----+     |   
+    +-----| EL2 |----+               +-----| HS |-----+   
+          +-----+                          +----+         
+             |                               |
+          +-----+                          +----+          
+          | EL3 |                          | M  |          
+          +-----+                          +----+          
+```
+
+需要在EL2增加拟化综合控制的寄存器，HCR_EL2(hypervisor configure register)。其中，
+HCR_EL2.E2H表示打开VHE，即host跑在EL2。以下讨论的都是HCR_EL2.E2H为1的情况。HCR_EL2.TGE
+为1表示当前在虚拟机里，为0表示当前在host里，这个和riscv上的V状态的逻辑是一致的，
+不知道为什么起一个trap general exceptions from EL0这样的名字。
+
+在VHE使能的时候，当CPU运行在EL2，寄存器有如下的映射，也就是软件访问或者硬件使用
+的寄存器实际上是右边的寄存器。CPU运行在EL2，系统状态可能在hypervisor也可能在host
+内核。
+```
+SCTLR_EL1      --->    SCTLR_EL2
+TTBR0_EL1      --->    TTBR0_EL2
+TTBR1_EL1      --->    TTBR1_EL2
+TCR_EL1        --->    TCR_EL2
+ESR_EL1        --->    ESR_EL2
+FAR_EL1        --->    FAR_EL2
+MAIR_EL1       --->    MAIR_EL2
+VBAR_EL1       --->    VBAR_EL2
+SPSR_EL1       --->    SPSR_EL2
+ELR_EL1        --->    ELR_EL2
+CPACR_EL1      --->    CPTR_EL2
+TRFCR_EL1      --->    TRFCR_EL2
+AFSR0_EL1      --->    AFSR0_EL2
+AFSR1_EL1      --->    AFSR1_EL2
+AMAIR_EL1      --->    AMAIR_EL2
+CONTEXTIDR_EL1 --->    CONTEXTIDR_EL2
+CNTKCTL_EL1    --->    CNTHCTL_EL2
+
+CNTP_TVAL_EL0  --->    CNTHP_TVAL_EL2
+CNTP_CTL_EL0   --->    CNTHP_CTL_EL2
+CNTP_CVAL_EL0  --->    CNTHP_CVAL_EL2
+
+CNTV_TVAL_EL0  --->    CNTHV_TVAL_EL2
+CNTV_CTL_EL0   --->    CNTHV_CTL_EL2
+CNTV_CVAL_EL0  --->    CNTHV_CVAL_EL2
+```
+
+如上的这些寄存器映射要和异常处理的逻辑结合起来理解。当CPU处在host用户态，发生trap
+到EL1的中断或异常时，CPU应该trap到EL2，并使用EL1的中断异常相关寄存器，按照如上的
+定义，这个时候实际使用的是EL2对应的寄存器。这里是通过HCR_EL2.TGE=1控制从原本的trap
+到EL1改成trap到EL2。
+
+注意，其中的一些寄存器，比如TTBR0_EL1/TTBR1_EL1，当CPU处于host用户态做地址翻译的
+时候也是会使用到的。(EL0/EL2地址翻译使用TTBR0_EL2/TTBR1_EL2)
+
+可以看到，ARM VHE的一部分寄存器逻辑和riscv的逻辑正好是反过来的。ARM是host的寄存器
+映射到XXX_EL2，riscv是guest的寄存器映射到V前缀的同名寄存器上。从host角度看，虚拟
+机是host上的一个线程，所以虚拟机线程具有host线程的上下文，从虚拟机自己的角度看，
+整个虚拟机实例又有自己的上下文，这个上下文包括GPR和虚拟机EL1的系统寄存器，这个上
+下文是对虚拟机这个机器的描述。
+
+ARM64还定义了一堆别名系统寄存器，当CPU运行在EL2/EL3时，如果要访问EL0/EL1的寄存器，
+需要使用这些寄存器，这些寄存器的名字是XXX_EL12，对应的EL0/EL1寄存器是XXX_EL0/XXX_EL1。
+之所以要使用别名寄存器访问EL1的寄存器，是因为VHE打开时，在EL2直接使用XXX_EL0/XXX_EL1
+访问寄存器，实际访问到的是映射到的XXX_EL2寄存器。
+
+看下地址翻译相关的东西。ARM spec在描述地址翻译时引入了Translation regimes的概念，
+ARM spec D8.1.2定义了一堆Translation regime。我们先不看安全(secure)和realm相关的
+东西，目前只要关注Non-secure EL1&EL0 translation regime和Non-secure EL2&EL0 translation
+regime的情况，对于Non-secure EL1&EL0 translation regime，当存在Non-secure EL2时，
+描述的是虚拟机的情况，需要做stage1和stage2翻译，对于Non-secure EL2&EL0 translation
+regime，描述的是host的情况，只需要做stage1的翻译。
+
+可以看到，只有EL1&EL0 translation regime会使用到stage2翻译，就是只有虚拟机会使用
+到stage2翻译，host(包括hypervisor)自己只会使用stage1翻译。
+
+Stage1翻译相关的寄存器是TTBR_EL1/TCR_EL1，只不过在host上实际使用的就是它们本身，
+guest的stage1翻译实际使用的是TTBR_EL2/TCR_EL2。Stage2翻译相关的寄存器是VTTBR_EL2/
+VTCR_EL2。
+
+todo: vtimer。
+
+todo: 普通外部中断虚拟化。
+
+todo: vLPI/vSGI/vNMI各自直接注入的逻辑。
+
+PMU相关寄存器
+--------------
+
+PMU基本逻辑和寄存器定义在独立的文档中描述。
+
+GIC
+----
+
+GIC有设备一侧的MMIO寄存器以及核一层的系统寄存器，这里只描述核一侧的系统寄存器。
+GIC核一侧的系统寄存器主要有：ICC_XXX_ELn/ICV_XXX_ELn/ICH_XXX_ELn。
+
+ICC_SRE_ELn, system register enable。
+ICC_PMR_ELn, priority mask register。
+ICC_CTRL_ELn, control completion of interrupt。
+ICC_IGRPEN1_ELn，interrupt group enable。
+
+需要在独立的文档中展开逻辑，再说吧。
+
+SMMU
+-----
+
+在CPU侧没有寄存器。
