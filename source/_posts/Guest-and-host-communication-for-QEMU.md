@@ -51,8 +51,17 @@ the gdb server in qemu.
 ```
 aarch64-linux-gnu-gdb
 (gdb) file ~/repos/kernel-dev/vmlinux
-(gdb) target remote :1234
+(gdb) target remote:1234
 ```
-Here we use a arm64 based gdb as an example. After "target remote :1234", we
+Here we use a arm64 based gdb as an example. After "target remote:1234", we
 can use gdb to debug kernel in qemu. You can just set break points, print value
 of variables...
+
+Or you can -s -S in qemu command line, then in another window, run gdb;
+target remote:1234 to connect gdb server in qemu. Then you can set breakpoint,
+run and so on. If you have done like above steps, but fail to set a breakpoint,
+please disable kaslr, and retry it. For disable kaslr, adding nokaslr in kernel
+command line, you can do this in qemu -append, like, -append "xxxx nokaslr"
+
+For debug qemu itself, you can run qemu and get the pid of qemu, then run gdb;
+attach <qemu_pid>
