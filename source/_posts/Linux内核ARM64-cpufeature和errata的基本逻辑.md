@@ -1,0 +1,140 @@
+---
+title: Linux内核ARM64 cpufeature和errata的基本逻辑
+tags:
+  - Linux内核
+  - ARM64
+description: 本文梳理Linux内核里ARM64下CPU特性和errata的基本逻辑，分析基于Linux内核v6.10-rc4。
+abbrlink: 18964
+date: 2024-08-05 23:35:36
+categories:
+---
+
+基本逻辑
+---------
+
+ARM64里先定义了feature/errata的全局的静态描述表，这些是当前内核可以支持的最大
+feature/errata列表：struct arm64_cpu_capabilities arm64_features[], arm64_errata[]
+
+如上静态表中的宏可能没有打开，内核重新把运行时的全局feature/errata表记录在：
+struct arm64_cpu_capabilities *cpucap_ptrs[]
+
+把经过检测得到的当前系统上支持的feature/errata保存在这个bitmap：system_cpucaps
+
+系统全局的feature寄存器保存的位置，似乎是各个core上的feature寄存器通过一定整理后
+保存到这个结构里。对于每个ID寄存器，都在arm64_ftr_regs有静态的定义。
+```
+static const struct __ftr_reg_entry {
+        u32                     sys_id;
+        struct arm64_ftr_reg    *reg;
+          +-> name/strict_mask/user_mask/sys_val/user_val
+          +-> struct arm64_ftr_override *override
+              /* 定义寄存器里各个域段的值，但是只定义了一部分 */
+          +-> struct arm64_ftr_bits *ftr_bits
+} arm64_ftr_regs[] = { ... }
+```
+
+具体的执行流程如下：
+```
+start_kernel
+      /* arch/arm64/kernel/smp.c */ 
+  +-> smp_prepare_boot_cpu
+        /*
+         * 这里各个core把CPU ID寄存器中的值读出来保存在per-cpu的cpu_data里，再
+         * 更新arm64_ftr_regs[]中的对应项。(struct cpuinfo_arm64 *cpu_data.)
+         */
+    +-> cpuinfo_store_boot_cpu
+          /* todo: 不清楚这里的逻辑 */
+      +-> init_cpu_features
+    +-> setup_boot_cpu_features
+```
+
+```
+setup_boot_cpu_features
+      /* 把arm64_features/errata静态表中定义的cap/errata保存到cpucap_ptrs */
+  +-> init_cpucap_indirect_list
+      /*
+       * 注意，这里只处理特定cap类型，全部类型：system/local_cpu/boot_cpu/all。
+       * 大部分是system的。todo: 各种类型cap的语意？
+       */
+  +-> setup_boot_cpu_capabilities
+        /* 
+         * 检测对应的特性是否存在，如果存在记录在system_cpucaps，如果是boot_cpu，
+         * 记录在boot_cpucaps。
+         * 
+         * 注意，errata也被当作特性，统一考虑。所以下面的函数中的capabilities
+         * 包括feature和errata。即cap = feature + errata。
+         */
+    +-> update_cpu_capabilities
+        /* 对于满足条件的特性，调用cpu_enable回调，使能对应cap */
+    +-> enable_cpu_capabilities
+
+        /* 相关逻辑单独考虑 */
+    +-> apply_boot_alternatives
+```
+
+SCOPE_SYSTEM cap的检测和配置流程如下：
+```
+/* 拉起一号进程的函数 */
+kernel_init
+  +-> kernel_init_freeable
+        /* 这里启动所有从核 */
+    +-> smp_init
+      ...
+	+-> secondary_start_kernel
+          ...
+              /* SCOPE_LOCAL_CPU cap的检测和配置*/
+          +-> check_lock_cpu_capabilities
+          ...
+
+        /* 这里从核已经起来 */
+
+      +-> smp_cpus_done
+        +-> setup_system_features
+```
+
+KVM虚拟机里的ID寄存器
+----------------------
+
+CPU ID寄存器本质上其实只是一个标记，对应功能的使能会另有寄存器控制。ARM64的vCPU
+在EL1读CPU ID寄存器时可能会(可以配置的)trap到EL2，这就给了KVM模拟vCPU CPU ID寄存
+器的机会。KVM可以把vCPU的CPU ID寄存器静态写死，QEMU也可以通过KVM_SET_ONE_REG这个
+ioctl接口调整KVM vCPU内部数据结构里的CPU ID值。
+
+ARM64 KVM的异常向量表的定义在linux/arch/arm64/kvm/hyp/hyp-entry.S。发生异常，trap
+到EL2，执行异常向量，然后执行__guest_exit，然后执行虚拟机退出的处理。所以，vCPU
+在EL1读CPU ID寄存器，触发trap到EL2的模拟流程大致如下：
+```
+/* 拉起虚拟机以及虚拟机退出处理逻辑都在这里，我们只关注虚拟机退出的处理 */
+kvm_arch_vcpu_ioctl_run
+  [...]
+  +-> handle_exit
+    +-> handle_trap_exceptions
+          /* 
+           * 通过退出原因拿到对应的处理函数，所有的退出处理函数在arm_exit_handlers
+           * 这个表里。这里我们主要看访问CPU ID寄存器的trap，这个时候拿到的处理
+           * 函数应该是kvm_handle_sys_reg。
+           */
+      +-> exit_handler // kvm_handle_sys_reg, 定义在arch/arm64/kvm/sys_regs.c。
+        +-> desc = &sys_regs_descs[sr_idx]
+            /*
+             * 可见是通过access回调去读模拟的CPU ID的值的，读写的操作都是在这个
+             * 函数里通过具体系统寄存器对应的access回调函数完成的。对于读操作，
+             * 完整的模拟过程需要把读出来的系统寄存器的值更新到被模拟MRS指令的
+             * GPR上，这个由下面的vcpu_set_reg完成，这个函数把读到的值更新到vCPU
+             * 的对应GPR上，下次vCPU上位后，对应GPR自然就是读到的值。
+             */
+        +-> perform_access
+        +-> vcpu_set_reg
+```
+可以看到，这把所有的系统寄存器都定义在sys_regs_descs数组里，不同回调函数完成不同
+的功能。比如，access处理KVM模拟guest系统寄存器读写的逻辑，通过ioctl KVM_SET_ONE_REG/
+KVM_GET_ONE_REG进来的访问最终会走到get_user/set_user。val提示系统寄存器哪些域段
+是ioctl KVM_SET_ONE_REG可写的，多一个控制约束而已。
+
+QEMU可以通过KVM_SET_ONE_REG控制vCPU的CPU ID寄存器的值，从而控制暴露给VM的vCPU特性。
+这个特性的一个常见用处就是做不同代CPU上的VM迁移，不同代CPU上的特性可能有不同，VM
+在不同代CPU迁移时可能会出问题，一个简单的办法就是QEMU控制VM上的特性，使得VM上的
+特性是所有不同种类CPU上特性的最小集。
+
+QEMU里对如上实现的vCPU做了进一步的封装(主要是针对X86 vCPU)，定义了种类繁多的vCPU
+类型，QEMU里把整个逻辑叫做QEMU CPU model，具体的说明可以参考[这里](https://qemu-project.gitlab.io/qemu/system/qemu-cpu-models.html)。
