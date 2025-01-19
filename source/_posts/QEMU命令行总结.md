@@ -1,0 +1,396 @@
+---
+title: QEMU命令行总结
+tags:
+  - QEMU
+description: 收集qemu各种配置命令。这里一般不区分kvm和tcg，在需要区分的时候，再作说明。如果qemu命令和平台相关，则使用ARM64平台。
+abbrlink: 51573
+date: 2025-01-19 22:02:21
+categories:
+---
+
+固件相关
+---------
+
+ - DTS
+
+  ARM64 qemu默认使用的是DTS，在不加-bios启动命令的时候就是用DTS启动系统的，qemu
+  代码会根据qemu命令行参数生成DTS并放置到内存的特定位置。
+
+ - ACPI
+
+  ARM64 qemu使用-bios可以指定EDK2的UEFI固件，这时qemu使用ACPI的方式启动，和DTS一
+  样，qemu代码会自动生成ACPI表格。
+
+  qemu会把各种固件作为submodule加到qemu的仓库里，编译过程生成的各种固件保存在
+  qemu/pc-bios/。
+
+  也可以用如下的方式直接下载EDK2代码仓编译QEMU_EFI.fd固件:
+```
+  git clone https://github.com/tianocore/edk2.git
+  git submodule update --init
+  source edksetup.sh
+  make -C BaseTools
+  build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtQemu.dsc
+  cd Build/ArmVirtQemu-AARCH64/DEBUGFS_GCC5/FV/
+```
+  编译好的QEMU_EFI.fd放在如上FV目录下，这样自行编译的固件是带调试打印的，guest
+  启动，QEMU_EFI.fd运行时会有很多调试信息打印出来。注意，编译过程中可能提示启动
+  中缺少必要的工具，直接安装对应的工具就好。比如如果缺acpi的相关工具，就ubuntu
+  下就：sudo apt install acpica-tools。QEMU_EFI.fd的编译是参考[这里](https://www.kraxel.org/blog/2022/05/edk2-virt-quickstart)。
+
+CPU
+----
+
+ - 基本
+
+ CPU的类型可以按如下配置。在tcg模式下，qemu支持很多不同的CPU类型，具体定义在
+ qemu/target/arm/tcg/cpu64.c的ARMCPUInfo aarch64_cpus里，指定具体的CPU name即可
+ 模拟对应种类的核；kvm模式下，一般使用-cpu host，即虚机CPU和host CPU是一致的；
+ 也可以用-cpu max指定使用尽可能多的CPU feature。
+```
+  -cpu name
+```
+
+ 多核系统上，qemu支持用如下的方式配置虚机的CPU拓扑结构：
+``` 
+  -smp cpus=8,maxcpus=32,sockets=2,clusters=4,cores=2,threads=2
+```
+  表示系统最大支持32个逻辑core，启动其中8个，系统中有2个socket，一个socket里有4
+  个cluster，一个cluster里有2个物理核，一个物理核有2个逻辑核。
+
+  可见，maxcpus = sockets * clusters * cores * threads。
+
+  如上启动的8个core，会依次分配到第一个socket里的前两个cluster。按照如下冷插的方
+  式可以指定启动core的具体位置。
+
+ - 冷插
+
+```
+ -device host-arm-cpu,id=core_x,socket-id=x,cluster-id=y,core-id=z,thread-id=n
+```
+  如上的方式可以指定具体位置的CPU核。
+
+ - 热插拔
+
+  如上的配置中，maxcpus大于系统启动的core数，差值就是支持热插的core的个数，可以
+  通过qemu monitor的命令进行CPU热插拔。（注意：ARM64的热插拔社区还是支持中）
+```
+(qemu) device_add cortex-a57-arm-cpu,id=core2,core-id=2
+...
+(qemu) device_del core2
+```
+  如上是tcg模式的CPU热插拔，KVM时把CPU类型改成: host-arm-cpu
+
+  如果qemu启动的时候指定了socket/cluster/core/thread等参数，可以使用如下的方式热
+  插CPU，如果对应的位置已经有CPU存在，会报错提示。
+```
+(qemu) device_add cortex-a57-arm-cpu,id=core_x,socket-id=x,cluster-id=y,core-id=z,thread-id=n
+```
+
+ - NUMA
+
+ 虚拟机的NUMA拓扑也是可以配置的，虚拟机的NUMA一般要和host NUMA配置的一致，这样
+ 性能最高。注意，这里有两层逻辑，第一层是虚拟机自己NUMA的配置，第二层是和host
+ NUMA的映射关系。
+
+ 如下的配置是把虚拟机里对应的vCPU分配给对应的虚拟机NUMA节点。完整的带内存的NUMA
+ 配置，以及和host的绑定关系，在后面总结。
+```
+  -numa node,memdev=mem0,nodeid=0,cpus=0-15 \
+  -numa node,memdev=mem1,nodeid=1,cpus=16-31 \
+```
+
+ - cache
+
+  qemu可以根据命令行配置的cache拓扑，生成DTS或ACPI中的对应表格，guest内核根据对应
+  的表示就可以知道guest系统的cache拓扑结构。
+
+  目前，qemu中的该特性还处于社区开发阶段。对应的补丁如下，前者是框架相关的支持，
+  后者是ARM体系结构上的支持。
+```
+  [PATCH v3 0/7] Introduce SMP Cache Topology
+  [RFC,0/5] Specifying cache topology on ARM
+```
+
+ - 单点特性
+
+  qemu支持单点开关一些特性，把它们总结在这里。qemu文档里有相关介绍，位置在
+  qemu/docs/system/arm/cpu-features.rst。如下的配置改成off，即把对应特性关闭了。
+
+   - SVE/SVE2/PMU
+
+```
+   -cpu host,pmu=on,sve=on,sve128=on,sve256=on
+```
+
+内存
+-----
+
+ - 基本
+
+  简单配置虚拟机的内存是4096MB。
+```
+  -m 4096M
+```
+  
+  如下配置是各种内存插拔的基础，如下具体的配置是最大支持内存是4G，启动自带的内存
+  是1024MB，还有三个内存插槽可以插内存。
+```
+  -m 1024M,slots=3,maxmem=4G
+```
+
+ - 冷插
+
+  qemu代码里对内存的各种插拔有文档描述，相关文档在qemu/docs/memory-hotplug.txt。
+  如下是一个实例的内存冷插的配置，这个配置具有一定的代表性，object表示一个内存后端
+  对象，device表示一个内存前端设备，前端设备通过memdev和后端对象关联在一起。
+```
+qemu [...] -m 6GB,slots=4,maxmem=10G \
+  -object memory-backend-file,id=mem1,size=1G,mem-path=/mnt/hugepages-1G \
+  -device pc-dimm,id=dimm1,memdev=mem1 \
+  -object memory-backend-file,id=mem2,size=256M,mem-path=/mnt/hugepages-2MB \
+  -device pc-dimm,id=dimm2,memdev=mem2
+```
+  如上大页的使用需要作提前的配置，具体方法在Linux内核代码文档里描述，具体路径在：
+  Linux/Documentation/admin-guide/mm/hugetlbpage.rst。
+
+  基本逻辑是，qemu可以使用-mem-path指定guest内存使用host上的大页，host可以在内核
+  cmdline或者sysfs文件系统指定预留的大页，然后通过mount -f hugetlbfs [大页参数] nonte /mnt/xxx
+  挂载对应大页文件系统，随后系统在对应挂载点下mmap分配内存就可以分配到对应的大页。
+  qemu -mem-path的参数就是对应大页文件系统的挂载目录。
+  
+ - 热插拔
+
+  在qemu monitor里运行命令进行热插，针对pc-dimm和nvdimm，有如下类似的热插拔命令：
+```
+(qemu) object_add memory-backend-ram,id=mem1,size=1G
+(qemu) device_add pc-dimm,id=dimm1,memdev=mem1
+```
+  对应的热拔命令，device和object的参数是对应的id：
+```
+(qemu) device_del dimm1
+(qemu) object_del mem1
+```
+ 
+  对于nvdimm，需要先在-machine里加上nvdimm使能，比如-machine virt,nvdimm=on。
+  qemu代码里有nvdimm的使用说明：qemu/docs/nvdimm.txt，简单使用如下：
+```
+(qemu) object_add memory-backend-ram,id=mem1,size=1G
+(qemu) device_add nvdimm,id=nvdimm1,memdev=mem1
+```
+
+ - NUMA
+
+  qemu的内存可以和host的特定NUMA绑定，如下配置了虚机上的两个NUMA节点，并且把这两个
+  NUMA节点的内存分别和host上NUMA node0以及node1节点上的内存绑定。注意，这里只是
+  绑定内存，CPU并没有绑定。可以在host使用taskset把vCPU线程做范围绑核或者一对一的
+  固定绑核。
+```
+  -m 4096M \
+  -object memory-backend-ram,id=mem0,size=2048M,host-nodes=0,policy=bind \
+  -object memory-backend-ram,id=mem1,size=2048M,host-nodes=1,policy=bind \
+  -numa node,memdev=mem0,nodeid=0,cpus=0-15 \
+  -numa node,memdev=mem1,nodeid=1,cpus=16-31 \
+```
+
+中断
+-----
+
+ ARM64 qemu为kvm模式时，host可以采用GICv3或GICv4的实现，guest上一般都是GICv3。
+ host采用GICv3时，虚拟机中断需要kvm显示注入，host采用GICv4以及以上版本时，GIC支持
+ 虚拟中断直通，其中GICv4.0/v4.1支持vLPI直通，GICv4.1支持vSGI直通。
+
+ guest GIC和host对guest GIC的模拟实现是两个独立的逻辑，host采用不同的模拟实现方式
+ 只对guest的vLPI以及vSGI的性能有影响。
+
+ 因为qemu使用的都是GICv3，所以qemu的配置都是一样的。如下的kernel_irqchip=on表示，
+ 这个GICv3的中断控制器是在host内核模拟出来的。
+```
+-machine virt,kernel_irqchip=on,gic-version=3
+```
+
+ 在host内核的cmdline里使用参数控制host模拟guest GIC的方式，如下打开GICv4中vLPI
+ 直通的支持。这里只是enable GICv4.0/v4.1，KVM会根据实际硬件的支持情况，进一步决定
+ 是否支持vSGI中断直通。
+```
+ kvm-arm.vgic_v4_enable=1
+```
+
+ - 伪vNMI/硬件vNMI
+
+IOMMU
+------
+
+ - vsmmu
+
+  qemu支持完全用软件模拟的SMMU，可以使用如下命令行使能。
+```
+qemu-system-aarch64 -machine virt,iommu=smmuv3
+```
+
+ - iommufd
+
+  当前社区正在引入iommufd支持，iommufd将逐步取代vfio的一部分功能，如下是基于iommufd
+  的vfio设备直通的配置。
+```
+-object iommufd,id=iommufd0
+-device vfio-pci,host=0000:02:00.0,iommufd=iommufd0
+```
+
+ - vSVA
+
+PCIe
+-----
+
+  qemu代码里有关于PCIe相关的配置，具体位置在：qemu/docs/pcie.txt。关于PCIe switch
+  的配置可以参考[这里](https://wangzhou.github.io/How-to-assign-more-than-31-VFs-to-one-VM/)，关于PCIe热插拔的配置可以参考[这里](https://wangzhou.github.io/qemu里pci设备的热插拔/)。
+
+网络
+-----
+
+ - virtio-net
+
+```
+-netdev tap,id=net,script=./qemu-ifup-nat,downscript=./qemu-ifdown-nat \
+-device virtio-net-pci,netdev=net,id=net1 \
+```
+  如上的配置会在host创建tap0，在guest创建一个virtio-net-pci设备，配置对应的IP后，
+  guest和host可以通过网络进行通信。
+
+  其中qemu-ifup-nat的内容为：
+```
+#!/bin/bash
+ifconfig $1 192.168.10.1 up
+```
+
+  其中qemu-ifdown-nat的内容为：
+```
+#!/bin/bash
+ifconfig $1 192.168.10.2 up
+```
+
+存储
+-----
+
+ - 基本
+
+  可以通过如下的方式创建一个文件，格式化成某种文件系统，然后使用-hda指定给qemu
+  使用。虚机启动后guest Linux系统下会看到诸如/dev/vda的存储设备，直接mount上就
+  可以使用。
+```
+qemu-img create -f raw block.img 10MB
+mkfs.ext4 block.img
+qemu-system-arm64 -hda block.img
+```
+
+ - virtio-blk
+
+  先用dd命令创建如下boot.img文件，如下配置创建一个virtio-blk-pci的virtio设备，它
+  接在对应的PCIe总线下，后端的存储设备用的是boot.img。
+```
+-device pcie-root-port,port=0x8,chassis=0,id=pci.0,bus=pcie.0,multifunction=on,addr=0x3 \
+-device pcie-root-port,port=0x9,chassis=1,id=pci.1,bus=pcie.0,addr=0x3.0x1 \
+-device virtio-blk-pci,drive=drive0,id=virtblk0,num-queues=8,packed=on,bus=pci.1 \
+-drive file=./boot.img,if=none,id=drive0,format=raw
+```
+
+ - virtio-scsi
+
+ - 安装Linux发行版
+
+  一般调试我们都是用minifs的内存文件系统，实际使用虚机的时候，需要在虚机上安装
+  Linux发行版，实际使用都用virsh命令操作，直接使用qemu命令行的方式可以参考[这里](https://wangzhou.github.io/在qemu虚拟机上安装Linux发行版/)。
+
+虚拟机热迁移
+-------------
+
+ - 基本热迁移
+
+  热迁移是qemu的基本特性，迁入端迁出端qemu的配置要完全一致。其中迁入端qemu需要增
+  加如下命令，表示迁入端的IP和port。(这里是在同一台机器上做迁移，所以IP的地方是0)
+```
+-incoming tcp:0:6666
+```
+  迁入端启动后会停下来等待即将到来的迁出端。
+
+  迁出端启动后进入qemu monitor输入迁移命令。
+```
+migrate -d tcp:0:6666
+```
+  迁入端在完成迁移后即进入stop状态，在monitor里运行cont命令可以继续运行迁入端虚机。
+
+ - 带VFIO设备热迁移
+
+```
+-object iommufd,id=iommufd0
+-device vfio-pci,host=0000:02:00.0,iommufd=iommufd0,enable-migration=on
+```
+
+ - 热迁移和热插拔联合
+
+  热迁移要保证迁移的两端虚机配置一致，其中包含热插拔的设备。
+
+虚拟机和物理机通信
+-------------------
+
+ - 9p文件系统
+
+  通过9p文件系统的虚机和物理机之间通信可以参考[这里](https://wangzhou.github.io/Guest-and-host-communication-for-QEMU/)。
+
+ - 网络
+
+  按如上网络章节中的方式通过网络通信。
+
+qemu/kvm调试选项
+-----------------
+
+ - qemu启动/停止
+
+ - qemu monitor
+
+  qemu monitor的使用方式收集在[这里](https://wangzhou.github.io/qemu-monitor介绍/)。
+
+  monitor支持通过telnet/tcp/udp使用，所以可以用程序和monitor做交互。在qemu命令行
+  里加上如下配置：
+```
+  -monitor tcp:127.0.0.1:3333,server,nowait
+```
+  monitor会监听对应ip:port上的消息，然后就可以向对应的ip:port发monitor命令来控制
+  虚机，比如如下的脚本把虚机直接关掉：
+```
+#!/bin/bash
+
+nc 127.0.0.1 3333 << EOF
+q
+EOF
+```
+
+ - telnet/串口
+
+  qemu支持串口从telnet导出。
+
+ - qemu trace
+
+  qemu里打开或者增加trace的方法可以参考[这里](https://wangzhou.github.io/qemu里增加trace的方法/)。
+
+ - kvm trace
+
+  Linux内核在KVM里加了很多tracepoint点，调试的时候可以在ftrace里打开对应tracepoint。
+
+ - qemu tcg调试
+
+  qemu tcg基本调试的方法可以参考[这里](https://wangzhou.github.io/qemu调试方法/)。
+
+ - qemu中的各种输出保存到文件
+
+  写脚本做测试时，一般我们把qemu相关的各种输出保存到文件里，对文件做过滤检测其中
+  相关信息。如下配置一个多路chardev，为其指定输出日志保存文件，并把它作为串口。
+  qemu运行中的guest内核以及shell中的输出都会保存到指定的日志文件里。注意，这里要
+  用display none而不是nographic。
+```
+  -display none \
+  -chardev stdio,mux=on,logfile=./qemu_log,id=char0 \
+  -serial chardev:char0
+```
+
+
