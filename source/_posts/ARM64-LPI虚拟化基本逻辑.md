@@ -1,0 +1,220 @@
+---
+title: ARM64 LPI虚拟化基本逻辑
+abbrlink: 63619
+date: 2025-04-12 19:45:28
+tags: [虚拟化, KVM, 中断]
+description: "本文整理ARM KVM中vLPI实现的基本逻辑。代码基于6.14-rc5内核。"
+categories:
+---
+
+基本逻辑
+---------
+
+host上不同的GIC版本对vGIC LPI的支持方式是不一样的，GICv3时，需要先trap到KVM，在
+KVM里向虚机注入中断，GICv4.0及后续的GIC版本支持vLPI直接注入虚机。
+
+虚拟机中的ITS设备是一个模拟出来的设备，对ITS相关资源的访问需要在KVM模拟。首先KVM
+需要模拟ITS的MMIO寄存器，通过模拟的MMIO寄存器，guest ITS上各种配置要被真实的配置
+到物理ITS上。
+
+虚机中的ITS的各种table是放到IPA上的。软件通过ITS command访问device table、ITT以及
+connection table，向虚机中的ITS发commnand(更新虚拟ITS commnand队列的写入指针)触发
+KVM trap，KVM中模拟对应的ITS command，这里的模拟就是在host向物理ITS发ITS command，
+把对应的配置下发到硬件。软件直接可以访问LPI config table，虚机中配置LPI config table
+后会发INV命令清理硬件中对应的缓存，KVM模拟INV命令时读虚机LPI config table的对应
+地址拿到对应中断的配置信息，然后更新对应的vLPI config table域段。
+
+物理上看，完整的vLPI中断上报，需要提前把这个vLPI中断的相关信息配置到物理硬件里，
+这些信息包扩: 这个vLPI发出设备的device id、eventid(一般就是PCIe设备的BDF和MSI/MSI-X
+cap里的data域段)，vLPI的中断号，vLPI要发送到的vCPU，vCPU在哪个物理CPU上，当vCPU
+不在位时是否需要触发的doorbell中断。从虚机的视角上看，vLPI的配置信息只有device id、
+event id、中断号以及vCPU，虚机并不感知物理CPU。
+
+KVM里模拟虚机ITS command，把vLPI的device id、event id、中断号以及vCPU配置到物理
+ITS上。KVM在vCPU上下线时，把vCPU和物理CPU的映射关系配置给物理ITS(todo?)。
+
+vLPI直通的基本逻辑可以参考[这里](https://wangzhou.github.io/ARM-GIC硬件逻辑总结/)。
+
+ITS模拟
+--------
+
+ARM KVM虚拟化的整体逻辑可以参考[这里](https://wangzhou.github.io/Linux内核ARM64-KVM虚拟化基本逻辑/)，其中有涉及ITS在KVM里的模拟逻辑。
+
+因为是模拟ITS，所以并不要需要模拟行为当下生效，只要功能正确就好。比如，KVM模拟虚机
+的MAPI时没有下ITS command，实际物理配置发生在kvm_vgic_v4_set_forwarding的流程里，
+是在guest访问VF MSI/MSI-X BAR的时候，截获完成host的配置。
+
+下面展开看下KVM里对ITS的各个命令都是怎么模拟的。KVM里为了模拟ITS，为ITS的device
+table/ITT/collection table建立了对应的软件数据结构，为创建的每个虚拟中断也建立了
+数据结构(vgic_irq)。对ITS comand的模拟基本上在改动这些数据结构中的内容，部分comand
+会涉及到硬件配置的改动。这些数据结构估计大部分是GICv3用的，GICv4.x后vLPI可以直通
+了，用的会比较少。
+
+
+GICv3中断注入
+--------------
+
+todo: ...
+
+
+GICV4.x中断直通
+----------------
+
+针对vm fd的操作，本意是通过eventfd，在kvm中把虚机中断注入给虚机。对于支持中断直通
+的场景，这里会执行如下irq_bypass_register_consumer，注册架构相关的consumer。这里
+的consumer和如下vfio_pci_core_ioctl一起完成直通中断在host物理GIC上的配置。
+```
+/* virt/kvm/kvm_main.c */
+kvm_vm_ioctl
+      /* KVM_IRQFD */
+  +-> kvm_irqfd
+    +-> kvm_irqfd_assign
+          /*
+           * 注册irq_bypass_consumer，其中的回调是：
+           * add_producer: kvm_arch_irq_bypass_add_producer 
+           * del_producer: kvm_arch_irq_bypass_del_producer
+           * stop:         kvm_arch_irq_bypass_stop
+           * start:        kvm_arch_irq_bypass_start
+           *
+           * 系统里有producers和consumers对应的链表，注册其实就是加到对应的链表里。
+           * 使用__connect函数可以把consumer和producer连接在一起，基本逻辑是consumer
+           * 调用add_producer，或者producer调用add_consumer。
+           */
+      +-> irq_bypass_register_consumer
+```
+
+虚机中访问MSI-X BAR的时候，会导致虚机退出到KVM，KVM进一步推出到qemu的vfio设备的
+模拟逻辑里，其中会针对vfio设备的fd调用如下ioctl在host上配置对应中断的支持通路。
+(todo: MSI cap的逻辑是怎么样的？)
+```
+vfio_pci_core_ioctl
+  +-> vfio_pci_ioctl_set_irqs     <--- VFIO_DEVICE_SET_IRQS
+    +-> vfio_pci_set_irqs_ioctl
+      +-> vfio_pci_set_msi_trigger   <--- VFIO_PCI_MSI_IRQ_INDEX
+        +-> vfio_msi_set_block
+          +-> vfio_msi_set_vector_signal  // 循环配置多个MSI？
+
+            +-> vfio_msi_alloc_irq
+            +-> request_irq(irq, vfio_msihandler, 0, ctx->name, trigger)
+                /* token: trigger, irq: irq, */
+            +-> irq_bypass_register_producer
+                  /*
+                   * consumer和producer的token一样才执行__connect。这里是调用上面
+                   * 注册的consumer中的add_producer回调函数。
+                   */
+              +-> __connect()
+```
+
+这里展开分析add_producer函数。
+(todo: 虚机里的GICv3的table和host上的vtable的对应关系？)
+```
+kvm_arch_irq_bypass_add_producer(kvm, virq, struct kvm_kernel_irq_routing_entry)
+  +-> kvm_vgic_v4_set_forwarding
+    +-> vgic_its_resolve_lpi
+        /* drivers/irqchip/irq-gic-v4.c */
+    +-> its_map_vlpi(virq, map)
+      +-> irq_set_vcpu_affinity(irq, xxx)
+        ...
+        +-> its_irq_set_vcpu_affinity        <--- struct irq_chip its_irq_chip
+          +-> its_vlpi_map                   <--- MAP_VLPI
+            |
+            +-> its_map_vm
+            | +-> its_send_vmapp
+            |
+            +-> lpi_write_config
+            | +-> ?
+            |
+            +-> its_send_discard
+            |
+            +-> its_send_vmapti
+```
+
+todo: vLPI pending配置enable的分析。todo：应该在active domain
+```
+```
+
+vCPU上下线逻辑
+---------------
+
+vCPU上下线中关于vLPI的处理。
+
+```
+kvm_sched_out
+  +-> kvm_arch_vcpu_put
+    ...
+    +-> kvm_vgic_put
+      +-> vgic_v3_put
+        +-> vgic_v4_put                        <-- 没有直通在这里返回
+          +-> its_make_vpe_non_resident
+            +-> its_send_vpe_cmd               <-- DESCHEDULE_VPE
+              +-> irq_set_vcpu_affinity
+                +-> its_vpe_set_vcpu_affinity  <-- irq_chip its_vpe_irq_chip
+                  +-> its_vpe_deschedule
+                    ...
+```
+
+```
+kvm_sched_in -> kvm_arch_vcpu_load -> kvm_vgic_load -> vgic_v3_load -> vgic_v4_load
+
+vgic_v4_load
+  +-> irq_set_affinity
+    ...
+    +-> its_vpe_set_affinity      <-- chip->irq_set_affinity, its_vpe_irq_chip
+      ...
+      +-> its_send_vmovp
+
+  +-> its_make_vpe_resident
+    ...
+    +-> its_vpe_set_vcpu_affinity <-- SCHEDULE_VPE
+      +-> todo: GICR_VPROPBASER/GICR_VPENDBASER
+```
+
+一个例子
+---------
+
+上帝视角看下当虚机系统里linux内核调用enable_irq时整个调用流程是怎么样的。
+```
+enable_irq -> __enable_irq -> irq_startup
+
+/* 配置中断使能 */
+__irq_startup
+  +-> enable_irq
+    +-> unmask_irq
+         /* 
+          * 直接找见最底层的PCIe设备的irq_unmask回调，内核这里有变动，以前的版本
+          * 是its_unmask_msi_irq
+          */
+      +-> pci_irq_unmask_msix
+        +-> cond_unmask_parent
+              /* irq-gic-v3-its.c: its_irq_chip的its_unmask_irq */
+          +-> its_unmask_irq
+            +-> lpi_update_config
+                  /*
+                   * 对于虚机或者只有host的情况，就是直接配置LPI config table的
+                   * 对应位置，具体位置是从config table的8192 byte起，以hwirq为
+                   * 索引，每个中断粘一个byte。
+                   */
+              +-> lpi_write_config
+                  /* 
+                   * guest上执行这个命令会trap到KVM里面模拟，kvm里的执行流程是:
+                   *
+                   * vgic_its_cmd_handle_inv
+                   *   -> update_lpi_config
+                   *     -> its_prop_update_vlpi
+                   *       -> irq_set_vcpu_affinity  具体为its_irq_chip里的回调
+                   *         -> its_vlpi_prop_update
+                   *            ...
+                   * kvm直接读guest里的LPI config table对应中断的配置，在host中
+                   * 同步到vLPI config table。
+                   */
+              +-> its_send_inv
+            /* guest里访问MSIX BAR触发退出到qemu里处理 */
+        +-> pci_msix_unmask
+
+/* 配置中断和core的关系 */
+irq_setup_affinity
+  +-> its_set_affinity
+        /* guest里movi命令触发kvm里对其的模拟 */
+    +-> its_send_movi
+```
+

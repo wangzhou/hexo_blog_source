@@ -1,0 +1,421 @@
+---
+title: Linux内核ARM64 KVM虚拟化基本逻辑
+tags:
+  - ARM64
+  - 虚拟化
+  - KVM
+description: >-
+  本文梳理Linux内核中ARM64虚拟化的基本逻辑，本文只梳理基于KVM的虚拟化。梳理
+  基于的Linux内核版本是v6.10-rc4，基于的QEMU版本是v9.0.50。
+abbrlink: 61059
+date: 2025-04-12 19:38:17
+categories:
+---
+
+## 基本逻辑
+
+Linux内核KVM的分析可以参考[这里](https://wangzhou.github.io/riscv-KVM虚拟化分析/)，不过这个分析是基于RISCV的。Linux的KVM基本框架可以
+参考基于RISCV的这个文档，我们这里着重分析ARM KVM的实现。
+
+ARM64 KVM的初始化入口。
+```
+kvm_arm_init
+      /* 初始化各个异常向量表 */
+  +-> kvm_init_vector_slots
+      /* 注意，这里初始化的是各个子系统的类，而不是实例。从下面的实例会看的更清楚 */
+  +-> init_subsystems
+  |     /* arch/arm64/kvm/vgic/vgic-init.c */
+  | +-> kvm_vgic_hyp_init
+  | | +-> vgic_v3_probe
+  | |   +-> kvm_register_vgic_device
+  | |         /* 按device type把对应的device回调注册入系统 */
+  | |     +-> kvm_register_device_ops(&kvm_arm_vgic_v3_ops, KVM_DEV_TYPE_ARM_VGIC_V3)
+  | |     +-> kvm_vgic_register_its_device
+  | |
+  | |   /* 注册各个timer的中断处理函数 */
+  | +-> kvm_timer_hyp_init
+  | |     /*
+  | |      * 拿到drivers/clocksource/arm_arch_timer.c里定义的arch_timer_kvm_info，
+  | |      * 读取count的方法在timecounter，也在KVM里得到，注意这里读的是CNTVCT。
+  | |      */
+  | | +-> info = arch_timer_get_kvm_info()
+  | |     timecounter = &info->timecounter
+  | |
+  | |     /* 把info->virtual_irq给到host_vtimer_irq，应该是27号中断 */      
+  | | +-> kvm_irq_init
+  | |
+  | |     /*
+  | |      * 注册host vtimer irq。vcnt溢出时触发这个中断，这个中断会报道kvm里。
+  | |      * 中断处理函数向vCPU注入对应的vtimer中断。在kvm_timer_should_fire里
+  | |      * 判断是否需要注入，在kvm_timer_update_irq里注入vtimer中断。
+  | |      *
+  | |      * todo: 怎么配置这个中断在kvm处理? 如何判断注入哪个vCPU？
+  | |      */
+  | | +-> request_percpu_irq(host_vtimer_irq, kvm_arch_timer_handler, "kvm guest vtimer", ...) 
+  | |
+  |   /* 创建/dev/kvm文件，后续的VM/vCPU等资源都从这个文件的ioctl创建出来 */
+  +-> kvm_init
+    +-> ioctl: KVM_CREATE_VM/KVM_CHECK_EXTENSION...
+```
+
+实例的初始化接口是各个ioctl接口。
+
+## 基本数据结构
+
+整个虚拟机的数据结构：
+```
+kvm
+  +-> kvm_arch arch                    // arm64 kvm结构
+    +-> arch_timer_vm_data timer_data  // timer公共
+      +-> voffset
+      +-> ppi[]
+
+    +-> vgic_dist vgic                 // GIC，父类是vgic_io_device
+      +-> vgic_dist_base               // 表示这个vm上的GICD的base
+      +-> its_vm its_vm                // 表示这个vm上的ITS
+        +-> its_vpe **vpes             // 表示这个vm上的各个vPE 
+          +-> vpe_id
+        +-> irq_domain *domain
+    +-> id_regs[]                      // 系统寄存器
+    +-> ctr_el0
+
+    +-> kvm_s2_mmu mmu                 // 内存
+```
+
+虚拟机上vCPU的数据结构：
+```
+kvm_vcpu 
+  +-> kvm_vcpu_arch arch               // arm64 vcpu结构，具体vCPU实例
+    +-> arch_timer_cpu timer_cpu       // arm64 vcpu timer结构
+    | +-> arch_timer_context timers[]  // 一个vcpu上多种类型timer
+    |   +-> arch_timer_offset offset
+    |     +-> vm_offset指针
+    |   +-> hrtimer
+    +-> vgic_cpu vgic_cpu              // GIC和core相关的部件
+      +-> vgic_v3_cpu_if vgic_v3
+        +-> its_vpe its_vpe            // its_vpe的指针会保存到如上vpes数组
+	  +-> irq_domain *sgi_domain
+      +-> vgic_io_device rd_iodev
+      +-> vgic_redist_region *rdreg
+          /* vCPU SGI和PPI的vgic_irq，vLPI的vgic_irq保存在vgic_dist->lpi_xa */
+      +-> private_irqs[]
+    +-> kvm_pmu                        // PMU
+      kvm_pmu_events events
+      kvm_pmc pmc 
+        idx
+        perf_event *perf_event
+      irq_num
+    ...
+```
+
+KVM中被模拟device的需要有个总线模型把它们的逻辑组织起来，相关的数据结构是kvm_io_device、
+kvm_io_bus以及kvm_io_range。kvm_io_device描述一个KVM里的设备，kvm_io_bus是kvm_io_device的
+bus，kvm_io_bus被划分位多个range，每个range都有对应的kvm_io_range。
+
+KVM里的device用面向对象的方式组织起来，比如，ARM64里KVM的vgic的父类即为kvm_io_device，
+每层数据结构中类的继承关系如下：
+```
+   kvm_io_device 
+     - kvm_io_device_ops *op = kvm_io_gic_ops
+         ^
+         |
+   vgic_io_device
+     - vgic_io_device *regions = its_registers
+         ^          ^
+         |           \
+      vgic_its    vgic_disc
+```
+基于如上的数据结构，vgic_register_its/dist/redist_iodev分别把ITS/GICD/GICR注册到
+系统中。具体的调用点在后面创建ITS的流程里。
+
+这些KVM中的device的模拟在KVM里进行，当guest内核访问这些device触发guest退出到KVM时，
+在KVM就可以直接模拟对应device的逻辑。如上的这些数据结构支持KVM可以找到对应device
+的处理逻辑。
+
+## 创建VM
+
+open如上的/dev/kvm得到一个fd，对fd做ioctl KVM_CREATE_VM，返回一个匿名fd表示被创
+建的vm:
+```
+/* virt/kvm/kvm_main.c */
+kvm_dev_ioctl_create_vm
+  +-> kvm_create_vm
+        /* 具体构架相关 */
+    +-> kvm_arch_init_vm
+      +-> kvm_init_stage2_mmu
+      +-> kvm_vgic_early_init
+          /* 更新kvm->arch.timer_data.ppi[] */
+      +-> kvm_timer_init_vm
+      +-> kvm_arm_init_hypercalls 
+    ... todo ...
+```
+
+对这个vm fd的各种ioctl用来创建VM的各个部件：
+```
+/* virt/kvm/kvm_main.c */
+kvm_vm_ioctl
+  +-> KVM_CREATE_VCPU
+  +-> KVM_SET_USER_MEMORY_REGION
+  +-> KVM_GET_DIRTY_LOG
+  +-> KVM_CLEAR_DIRTY_LOG
+  ...
+  +-> KVM_IRQFD
+  +-> KVM_SET_GSI_ROUTING
+
+      /* 创建kvm上的各个设备, GICv3设备就是通过这个接口创建起来的 */
+  +-> KVM_CREATE_DEVICE
+
+  +-> KVM_CREATE_GUEST_MEMFD
+  ...
+```
+
+使用vm ioctl KVM_CREATE_VCPU 创建vCPU的流程：
+```
+kvm_vm_ioctl的KVM_CREATE_VCPU
+  +-> kvm_vm_ioctl_create_vcpu
+    +-> kvm_arch_vcpu_create
+          /* vtimer */
+      +-> kvm_timer_vcpu_init
+      |     /*
+      |      * 把如上vm_offset指针指向内容更新为当前CNTVCT的值，这还没有更新到
+      |      * 寄存器里。
+      |      */
+      | +-> timer_set_offset(vcpu_vtimer(vcpu), kvm_phys_timer_read())
+      |     /* todo: ... */
+      | +-> hrtimer_init
+      |     /* todo: ... */
+      | +-> timer->bg_timer.function = kvm_bg_timer_expire
+      |   /*
+      |    * 简单初始化，相当于放了一个桩，后面通过vcpu的KVM_ARM_VCPU_PMU_V3_CTRL
+      |    * 以及相关的PMU这一级的attr进行初始化和属性配置:
+      |    * kvm_arm_vcpu_arch_set_attr(KVM_ARM_VCPU_PMU_V3_CTRL/attr)
+      |    */
+      +-> kvm_pmu_vcpu_init
+      |
+      |   /* 注册当前vCPU的GICR */
+      +-> kvm_vgic_vcpu_init(vcpu)
+        +-> vgic_register_redist_iodev
+```
+
+使用vCPU的对应的fd, 通过ioctl操作vCPU, 操作有KVM_RUN/KVM_GET_REGS/KVM_SET_REGS...
+其中default会走到架构自定义的vCPU ioclt里，ARM64会在其中做vcpu_init。
+```
+/* virt/kvm/kvm_main.c */
+kvm_vcpu_ioctl
+      /* 拉起vCPU的入口，下面拉出来独立分析 */
+  +-> KVM_RUN
+    +-> kvm_arch_vcpu_run_pid_change    <--- 语意是第一次运行？
+    | +-> kvm_vgic_map_resources
+    | |
+    | | +-> vgic_v3_map_resources
+    | |   +-> vgic_v4_configure_vsgis   <--- 
+    | |     +-> vgic_v4_enable_vsgis
+    | |
+    | |     /* 这里才注册GICD */
+    | | +-> vgic_register_dist_iodev
+    | |       /* 更新kvm->buses[bus_idx] */
+    | |   +-> kvm_io_bus_register_dev
+    | +-> kvm_timer_enable
+    |       /* todo: ... */
+    |   +-> kvm_vgic_map_phys_irq
+    +-> kvm_arch_vcpu_ioctl_run       <--- 拉起vCPU !!
+  +-> default
+    +-> kvm_arch_vcpu_ioctl
+
+      KVM_ARM_VCPU_INIT:
+        +-> kvm_arch_vcpu_ioctl_vcpu_init
+          +-> kvm_vcpu_set_target
+                /* 在这里面初始化各种系统寄存器、pmu、timer、sve */
+            +-> kvm_reset_vcpu
+                  /*
+                   * 其中调用每个系统寄存器的reset回调，把返回值保存到
+                   * kvm->arch->id_regs[]。
+                   */
+              +-> kvm_reset_sys_regs
+                  /* todo: ... */
+              +-> kvm_timer_vcpu_reset
+      KVM_SET_ONE_REG
+      KVM_GET_ONE_REG
+      ...
+      KVM_SET_DEVICE_ATTR             // 各种core相关设备的初始化和属性配置
+        +-> KVM_ARM_VCPU_PMU_V3_CTRL
+          +-> IRQ/INIT/FILTER/SET_PMU
+        +-> KVM_ARM_VCPU_TIMER_CTRL
+        +-> KVM_ARM_VCPU_PVTIME_CTRL
+      KVM_GET_DEVICE_ATTR
+      ...
+```
+
+## CPU虚拟化
+
+拉起vCPU的入口
+```
+/* arch/arm64/kvm/arm.c */
+kvm_arch_vcpu_ioctl_run
+  /*
+   * 控制vCPU运行的核心逻辑，注意这里如果vCPU退到KVM里可以处理，KVM处理完后会马
+   * 上再次进入vCPU执行。
+   */
+  while (ret > 0) {
+        /* 拉起vCPU的核心逻辑，单独分析 */
+    +-> kvm_arm_vcpu_enter_exit
+    ...
+        /* VM退出到KVM的入口，arch/arm64/kvm/handle_exit.c */
+    +-> handle_exit
+          /* trap到KVM的逻辑入口 */
+      +-> handle_trap_exceptions
+            /*
+             * 根据trap时报的EC类型选择不同的处理函数，整个处理函数的列表定义在:
+             * arm_exit_handlers数组。
+             *
+             * 其中，对于系统寄存器触发的trap在kvm_handle_sys_reg中处理。对mmio
+             * 的处理流程是：
+             * kvm_handle_guest_abort->io_mem_abort->kvm_io_bus_read/write。
+             */
+        +-> kvm_get_exit_handler
+        +-> exit_handler
+  }
+```
+
+vCPU从kvm_arm_vcpu_enter_exit进入，遇到host的异常或中断跳到对应的处理程序中处理，
+然后又从kvm_arm_vcpu_enter_exit里回到KVM里。
+```
+kvm_arm_vcpu_enter_exit
+  +-> __kvm_vcpu_run         // 只看vhe的场景
+    +-> local_daif_mask
+      +-> __kvm_vcpu_run_vhe
+        +-> __activate_traps
+        | +-> ___activate_traps(vcpu, __compute_hcr(vcpu))
+        |     /* 进vCPU之前把异常向量换成kvm_hyp_vector */
+        | +-> write_sysreg(__this_cpu_read(kvm_hyp_vector), vbar_el1)
+        |
+        |   /* 准备好guest的上下文后，eret切到EL1 guest执行 */
+        +-> __guest_enter    // arch/arm64/kvm/hyp/entry.S
+        |
+        |   /*
+        |    * 换上host的异常向量表: entry.S里的vectors。vectors里的各个异常向量
+        |    * 的宏展开里有字符串拼接的跳转函数名字，这些函数定义在entry-common.c：
+        |    * 
+        |    * el1t_64_sync_handler/el1t_64_irq_handler - 触发异常和taken都在EL1
+        |    * el1h_64_sync_handler/el1h_64_irq_handler / 
+        |    * el0t_64_sync_handler/el0t_64_irq_handler - 从EL0切到EL1出异常中断
+        |    * 
+        |    * 注意，如果host在EL2，如上EL1实际上是EL2。
+        |    */
+        +-> __deactivate_traps
+
+    +->local_daif_restore
+```
+
+cpu_set_hyp_vector里从一些异常向量里选择一个更新kvm_hyp_vector。
+```
+init_subsystems
+  -> cpu_hyp_init
+    -> cpu_hyp_reinit
+      -> cpu_hyp_init_features
+        -> cpu_set_hyp_vector
+```
+先看一个向量__kvm_hyp_vector。
+/* arch/arm64/kvm/kvm/hyp/hyp-entry.S */
+```
+SYM_CODE_START(__kvm_hyp_vector)                                                
+        invalid_vect    el2t_sync_invalid   // Synchronous EL2t             
+        invalid_vect    el2t_irq_invalid    // IRQ EL2t                     
+        invalid_vect    el2t_fiq_invalid    // FIQ EL2t                     
+        invalid_vect    el2t_error_invalid  // Error EL2t                   
+                                                                            
+        valid_vect      el2_sync            // Synchronous EL2h        <--- A
+        invalid_vect    el2h_irq_invalid    // IRQ EL2h                     
+        invalid_vect    el2h_fiq_invalid    // FIQ EL2h                     
+        valid_vect      el2_error           // Error EL2h                   
+                                                                            
+        valid_vect      el1_sync            // Synchronous 64-bit EL1  <--- B
+        valid_vect      el1_irq             // IRQ 64-bit EL1               
+        valid_vect      el1_fiq             // FIQ 64-bit EL1               
+        valid_vect      el1_error           // Error 64-bit EL1             
+                                                                            
+        valid_vect      el1_sync            // Synchronous 32-bit EL1       
+        valid_vect      el1_irq             // IRQ 32-bit EL1               
+        valid_vect      el1_fiq             // FIQ 32-bit EL1               
+        valid_vect      el1_error           // Error 32-bit EL1             
+SYM_CODE_END(__kvm_hyp_vector)                                                  
+```
+如上异常向量表在进入虚拟机之前被配置上，所以只有在虚机里有异常需要host处理，或者
+host本身有异常或中断需要处理时，才会进入到这个异常向量表。这时相当于低级别特权级
+进入高级别特权级处理异常和中断，就是B这组异常向量。而A组异常向量只有el2_sync和
+el2_error两个有效，似乎是EL2遇到非法指令才会走到这里。
+
+具体看下B这组异常向量里的各个向量。EL1异常需要EL2处理时，跳到el2_sync，随后
+el2_sync->el1_trap->__guest_exit，在__guest_exit里恢复host的上下文，然后ret返回到
+__guest_enter的下一条指令。整体逻辑上看，虚机从__guest_enter进入，同样从__guest_enter
+退出来。el1_irq/el1_fiq/el1_error，把异常原因保存到x0，同样跳到__guest_exit。
+
+## 内存虚拟化
+
+todo: ...
+
+## 中断虚拟化
+
+ARM KVM里模拟了GIC中的各个部件，当guest访问GIC相关的系统寄存器和MMIO寄存器时，会
+trap到KVM完成模拟。这里要整理的逻辑有：1. KVM里中断控制器的数据结构和初始化逻辑，
+2. GIC相关的系统寄存器和MMIO寄存器的访问逻辑，3. 每种中断运行时的基本逻辑。本文
+只整理前两点，第三点需要另外文档中展开描述。
+
+GICD/GICR的数据结构的位置在上文已经提到过。ARM KVM下ITS的数据结构是vgic_its，它
+的保存位置在，kvm->devices(kvm_device的list)->kvm_device->private，可见kvm里用一
+个devices链表保存所有kvm_device，而vgic_its就是一种kvm_device。如下ITS对应的create
+函数创建vgic_its并把其保存到private里。
+
+如上已经提到过GICv3和ITS的注册点: kvm_arm_init->init_subsystems->kvm_vgic_hyp_init...
+
+触发中断控制器实例创建的是后续的ioctl。GICv3/ITS设备创建是通过vm ioctl的
+KVM_CREATE_DEVICE接口：
+```
+/* virt/kvm/kvm_main */
+kvm_ioctl_create_device
+      /*
+       * 在kvm_device_ops_table中找见之前注册的设备，调用对应的create。注意，在
+       * kvm_arm_init里已经注册过KVM_DEV_TYPE_ARM_VGIC_V3和KVM_DEV_TYPE_ARM_VGIC_ITS。
+       *
+       * GICv3的create是vgic_create， arch/arm64/kvm/vgic/vgic-init.c。
+       * ITS的create是vgic_its_create，arch/arm64/kvm/vgic/vgic-its.c，注意，ITS
+       * 的create里有GICv4的create。
+       */
+  +-> op->create
+      /* 为设备创建匿名文件，后面set_attr/get_attr等操作都是通过这个文件的ioctl */
+  +-> anon_inode_getfd
+```
+
+虽然有create函数，但是GICv3的实例创建确是set_attr中的KVM_DEV_ARM_VGIC_CTRL_INIT
+里做的。
+```
+vgic_v3_set_attr
+  +-> vgic_set_common_attr
+    +-> vgic_init
+      +-> kvm_vgic_dist_init
+      +-> vgic_v4_init
+      +-> kvm_vgic_vcpu_init                       // 循环操作每个vcpu
+      +-> kvm_vgic_setup_default_irq_routing
+      ...
+```
+
+如上的逻辑还没有把vgic_its/vgic_disc/vgic_cpu(GICR)加入kvm_io_device/bus/range描
+述的数据结构中。vgic_its的注册由set_attr中的接口完成，基地址从用户态配置下来，这
+里根据基地址就可以确认KVM bus/range中的位置。
+```
+vgic_its_set_attr                 // KVM_DEV_ARM_VGIC_GRP_ADDR
+  +-> vgic_register_its_iodev
+    +-> kvm_io_bus_register_dev
+```
+如上vgic_dist的注册在KVM_RUN的流程里，vgic_cpu的注册在KVM_CREATE_VCPU的流程里。
+这里的逻辑有点乱:(
+
+可以看到模拟GIC既可以在KVM中直接访问，也可以从用户态通过ioctl接口访问。从KVM中访
+问的逻辑在如上CPU虚拟化章节有提到。
+
+从ioctl访问使用的接口是：kvm_vcpu_ioctl + KVM_SET_DEVICE_ATTR + 
+KVM_DEV_ARM_VGIC_GRP_ITS/DIST/REDIST_REGS，KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS
+
+基于如上的数据结构，我们可以分析特定中断类型的业务逻辑，可以大概分类为：1. vSPI的
+基本逻辑，2. vLPI以及vLPI直通的基本逻辑，3. vSGI以及vSGI直通的基本逻辑，4. vtimer
+的基本逻辑。

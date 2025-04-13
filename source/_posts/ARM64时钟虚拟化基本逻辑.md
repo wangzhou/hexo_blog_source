@@ -1,0 +1,164 @@
+---
+title: ARM64时钟虚拟化基本逻辑
+abbrlink: 41224
+date: 2025-04-12 19:46:17
+tags: [虚拟化, KVM, 时钟]
+description: "文本整理Linux下基于KVM的ARM64时钟虚拟化的基本逻辑。"
+categories:
+---
+
+硬件逻辑
+---------
+
+ARM spec的D11章节定义了generic timer，其定义主要分两个概念：system counter和timer。
+system counter是以一定频率增加的计数器，频率和计数器的数值分别记录在对应的寄存器
+里。在每个core上有timer相关的寄存器，分别有：1. CompareValue寄存器，当counter的
+值和CompareValue的值相等时触发timer中断(PPI)；2. 相关timer中断的控制寄存器；3.
+TimerValue寄存器，这个寄存器的值从大到小递减，减到0时触发timer中断。
+
+下面以EL1 physical counter-timer寄存器为例，罗列出相关的寄存器。
+```
+CNTFRQ_EL0，counter-timer frequency register。
+CNTPCT_EL0，counter-timer physical counter register。
+
+CNTP_CTL_EL0，counter-timer physical timer control register。
+CNTP_TVAL_EL0，counter-timer physical timer TimerValue register。
+CNTP_CVAL_EL0，counter-timer physical timer CompareValue register。
+```
+ARM spec里还定义了其它特权级的对应counter和timer寄存器，这些异常级别timer还有：
+EL1 virtual timer，非安全EL2 physical timer, 非安全EL2 virtual timer，EL3以及安全
+态下的各种timer。
+
+对于virtual timer，它的触发逻辑有一些不同，ARM引入了一个CNTVOFFSET_EL2寄存器，
+物理counter减去这个值是CNTVCT_EL0的值，即CNTVCT_EL0 = CNTPCT_EL0 - CNTVOFFSET_EL2。
+在这样的硬件设计下，物理count是一直在走的，对于一个特定的vCPU想要得到它在线的count
+数，只要用物理count减去vCPU下线时间对应的count数就好。
+
+virtual timer对应的中断被触发的逻辑是vitual timer的CompareValue寄存器和CNTVCT_EL0
+做比较。
+
+各个timer分别有自己的中断号，不考虑EL3和安全的话，常用的就是如下这几个：
+```
+                                              host                 guest
++------------------------------+-----------+--------------------+-------------+
+| EL1 physical timer           |       30  |  kvm guest ptimer  |             |
++------------------------------+-----------+--------------------+-------------+
+| EL1 virtual timer            |       27  |  kvm guest vtimer  |  arch_timer |
++------------------------------+-----------+--------------------+-------------+
+| 非安全EL2 physical timer     |       26  |  arch_timer        |             |
++------------------------------+-----------+--------------------+-------------+
+| 非安全EL2 virtual timer      |       28  |                    |             |
++------------------------------+-----------+--------------------+-------------+
+```
+
+时钟虚拟化的逻辑
+-----------------
+
+为了使得虚拟机里感知到实际的物理时间流逝，实际上并不是像上面说的，使用CNTVOFFSET_EL2
+统计vCPU下线的总时间，这样计算出来的CNTVCT_EL0是虚拟机实际在位的总counter。
+
+实际的行为是，在虚拟机启动时读出CNTPCT_EL0的值，把这个值写入CNTVOFFSET_EL2，后续
+虚拟机就一直使用这个值。这样的实现使得虚拟机在启动的时候CNTVCT_EL0是0，并且随后
+CNTVCT_EL0的值就是虚拟机看到的实际经过的counter数。
+
+这样，即使虚拟机不在线时，虚拟机对应的counter也在增加。比如，如果虚拟机里的Linux
+系统的HZ=250，也就是语意为4ms会产生一个时钟中断，对应的物理行为可能是，vCPU在下线
+时，其对应的CNTVCT_EL0和其对应的CNTV_CVAL_EL0已经满足中断触发的条件，在vCPU上线后，
+马上会触发vCPU的timer中断。所以，从宏观上看，在虚拟化下，基于timer的资源管理行为
+和host上的次数是一样的，只是vCPU执行"有用功"的实际时间少了。
+
+QEMU/KVM代码分析
+-----------------
+
+在[这里](https://blog.csdn.net/sungeshilaoda/article/details/90698619)有个时钟虚拟机KVM代码的分析，写的很不错。时钟虚拟化的逻辑和ARM KVM的逻辑
+交织在一起，整体的逻辑也可以看到[这里](https://wangzhou.github.io/Linux内核ARM64-KVM虚拟化基本逻辑/)。本文中我们
+再把和时钟有关的逻辑单独抽出来分析下。
+
+ARM64 KVM初始化入口，kvm_arm_init->init_subsystems->kvm_timer_hyp_init:
+```
+kvm_timer_hyp_init
+  /*
+   * 拿到drivers/clocksource/arm_arch_timer.c里定义的arch_timer_kvm_info，读取
+   * count的方法在timecounter，也在KVM里得到，注意这里读的是CNTVCT。
+   */
+  info = arch_timer_get_kvm_info()
+  timecounter = &info->timecounter
+
+  kvm_irq_init
+    /* 把info->virtual_irq给到host_vtimer_irq，应该是27号中断 */      
+    host_vtimer_irq = info->virtual_irq
+
+    kvm_vgic_global_state.no_hw_deactivation ?
+
+  /*
+   * 注册host vtimer irq。vcnt溢出时触发这个中断，这个中断会报道kvm里。中断处理
+   * 函数向vCPU注入对应的vtimer中断。在kvm_timer_should_fire里判断是否需要注入，
+   * kvm_timer_update_irq里注入vtimer中断。
+   *
+   * 当vCPU正在运行时，这个中断被触发，中断会被taken，但是会进入kvm的中断向量里，
+   * 但是kvm中断向量里并不会处理这个中断，vCPU退出到KVM后，换上host的中断异常向量，
+   * 打开中断后，这个中断会再次被taken。
+   */
+  request_percpu_irq(host_vtimer_irq, kvm_arch_timer_handler, "kvm guest vtimer", ...) 
+    kvm_arch_timer_handler
+      if (kvm_timer_should_fire)
+        /* 给vCPU注入中断 */
+        kvm_timer_update_irq(vcpu, true, ctx)
+          kvm_vgic_inject_irq
+```
+
+创建VM，kvm_dev_ioctl_create_vm->kvm_timer_init_vm:
+```
+/* 更新kvm->arch.timer_data.ppi[] */
+kvm_timer_init_vm
+```
+
+创建vCPU，kvm_vm_ioctl->kvm_vm_ioctl_create_vcpu->kvm_arch_vcpu_create:
+```
+kvm_timer_vcpu_init
+  /*
+   * 把如上vm_offset指针指向内容更新为当前CNTVCT的值，这还没有更新到寄存器里。
+   * kvm_phys_timer_read为timecounter->c->read(timecounter->cc)，使用的即为如上
+   * 的timecounter。这里是在vCPU创建的时候物理counter的值，也就是cntvoffset的值。
+   */
+  timer_set_offset(vcpu_vtimer(vcpu), kvm_phys_timer_read())
+  /* 初始化background timer */
+  hrtimer_init
+  /*
+   * 挂上background timer的处理函数，其中检测是否有timer到期，如果没有到期就重置
+   * background timer，如果到期，就唤醒对应vCPU：kvm_vcpu_wake_up。
+   *
+   * todo: background timer作用？什么时候start它？
+   */
+  timer->bg_timer.function = kvm_bg_timer_expire
+```
+
+vCPU init，kvm_vcpu_ioctl(default)->kvm_arch_vcpu_ioctl(KVM_ARM_VCPU_INIT)->
+kvm_arch_vcpu_ioctl_vcpu_init->kvm_vcpu_set_target->kvm_reset_vcpu:
+```
+kvm_timer_vcpu_reset
+  timer_set_ctl
+  /* todo: ? */
+  kvm_timer_update_irq
+  kvm_vgic_reset_mapped_irq
+```
+
+拉起vCPU投入运行，kvm_vcpu_ioctl(KVM_RUN)->kvm_arch_vcpu_run_pid_change:
+```
+kvm_timer_enable
+   /* todo: ... */
+   kvm_vgic_map_phys_irq
+```
+
+实际timer相关配置物理寄存器的地方。 todo
+```
+kvm_arch_vcpu_put
+  kvm_timer_vcpu_put
+    /* 保存下线vCPU vtimer的状态 */
+    timer_save_state
+
+kvm_arch_vcpu_load
+  kvm_timer_vcpu_load
+    /* 恢复上线vCPU vtimer的状态 */
+    timer_restore_state
+```

@@ -2,6 +2,7 @@
 title: QEMU命令行总结
 tags:
   - QEMU
+  - 虚拟化
 description: 收集qemu各种配置命令。这里一般不区分kvm和tcg，在需要区分的时候，再作说明。如果qemu命令和平台相关，则使用ARM64平台。
 abbrlink: 51573
 date: 2025-01-19 22:02:21

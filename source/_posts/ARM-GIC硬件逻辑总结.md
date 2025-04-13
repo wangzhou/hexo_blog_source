@@ -1,0 +1,410 @@
+---
+title: ARM GIC硬件逻辑总结
+tags: [中断, GIC, 计算机体系结构, ARM64]
+description: >-
+  本文是ARM的文档《GICv3 and GICv4 Software
+  Overview》的一个学习笔记，GICv3/GICv4的基本逻辑会持续的总结到这个文档里。这个文档貌似是基于2016的GIC协议，我们参考的GICv3/GICv3的协议是H.b版本。
+abbrlink: 28959
+date: 2025-04-12 18:07:32
+categories:
+---
+
+GIC的需求
+----------
+
+外部各种各样的原因都可以中断CPU核的执行，也就是给CPU发中断，中断控制器汇集各种
+外设的中断，通过CPU的中断接口报给CPU，CPU在收到中断后查特定的中断相关的寄存器，
+获得对应的中断ID，再通过ID查找到对应的中断处理函数，执行中断处理函数后完成整个中
+断处理流程。
+
+我们先分析中断控制器(GIC)的基本需求，然后一一看下，GIC实现各个需求的基本逻辑。
+
+1. GIC要管理每个中断和中断ID(INTID)的对应关系。CPU通过GIC的寄存器得到当前中断的
+   INTID，那么GIC硬件本身就要维护GIC输入到INTID的映射关系。
+
+2. 中断处理过程中，一个中断会处在不同的状态上。GIC要维护每个中断的状态。
+
+3. 中断可以被控制报到特性的CPU核上，GIC要维护每个中断到CPU核的路由关系。这个路由
+   关系包括两个维度：1. 中断报到哪个CPU核上，2. 中断在CPU核的哪个EL状态做处理。
+
+4. 各种不同的中断可能会同时报到一个CPU核，CPU处理它们有先后顺序，GIC要维护各个中
+   断的优先级。
+
+5. 中断个数持续扩展，GIC要有一定的可扩展性。 
+
+6. 对于支持虚拟化的CPU核，GIC要配合支持，并尽量降低开销。
+
+INTID和中断种类
+----------------
+
+GIC把中断分成了不同的种类：PPI，SGI，SPI和LPI。PPI(private peripheral interrupt)
+一般用来接CPU核的Timer中断，INTID在16-31，注意是每个core上都有处于16-31编号的PPI，
+一个core上多个特权态都有自己的PPI INTID，SBSA定义了固定的PPI INTID。SGI(software
+generate interrupt)，用来做IPI中断，软件写对应的GIC寄存器，触发另一个core上的SGI
+中断，INTID在0-15。SPI(shared peripheral interrupt)一般外设使用的中断类型, INTID
+在32-1019。LPI(locat peripheral interrupt)，支持PCIe设备上的消息中断(MSI)，INTID
+在8192或者更大。
+
+GIC中断控制器从v1发展到v4，v2已经支持PPI/SGI/SPI，使用GIC CPU interface(GICC)和
+GIC distributor(GICD)支持，对于每个中断，GICD上都有专门的MMIO寄存器描述(或配置)
+它的中断触发方式/中断状态/中断路由/中断优先级等信息，GICv3/GICv4继承了这样的设计，
+并在这个基础上增加了ITS和GIC redistributor(GICR)支持更多数量的MSI中断，所以GICv3/
+GICv4对于SPI也有大量的配置寄存器。
+
+MSI数量巨大，配置信息保存在内存中的表格里，下配置的方式也改用命令进行，也就有comand
+queue之类的设计。
+
+中断触发方式和中断状态
+-----------------------
+
+中断的触发方式有电平触发和边沿触发，这里触发方式是指外设中断和GIC的输入之间的信
+号。中断状态有：inactive, pending, active & pending, active，中断在不同的触发方
+式下具有不同的状态机。
+
+对于电平中断，外设中断电平拉起(inactive -> pending)，CPU通过ICC_IARn_EL1读INTID
+(pending -> active & pending)，CPU写外设寄存器拉低外设的中断电平(active & pending -> active)，
+CPU通过ICC_CTRL_EL1配置EOI(active -> inactive)。注意，这里用高电平代表有中断，只
+是为了方便描述，实际也可能是反过来。
+
+对于边沿中断，外设发起边沿中断(inactive -> pending)，CPU通过ICC_IARn_EL1读INTID
+(pending -> active)，如果这个时候，外设又有边沿触发的中断(active -> active & pending)，
+CPU通过ICC_CTRL_EL1配置EOI(active & pending -> pending)。对于处于active的中断，
+如果CPU通过ICC_CTRL_EL1配置EOI(active -> inactive)。
+
+总结下各个状态的语意，inactive是没有中断，pending是外设有中断信号，但是CPU还没有
+处理，active是CPU读了INDID，并在处理中断，active & pending在电平和边沿触发中断下
+的语意不一样，电平中断下，表示CPU还没有控制外设拉低外设和GIC之间的电平，边沿触发
+中断，表示CPU在处理当前中断的时候，外设又来了一个中断。
+
+LPI只有inactive和pending，为什么只有两种？和ICC_IARn_EL1/ICC_CTRL_EL1如何配合?
+
+GIC的各个模块
+--------------
+
+这一节我们先梳理各个模块的基本逻辑。GIC上包括的各个部件主要有GICC/GICR/GICD/ITS等，
+它们之间的逻辑关系如下图：
+```   
+                                           Memory:
+
+        +----------+   +-------+           +------------+ +---+ +----------------+
+        |   GICD   |   |  ITS  | --------> |device table| |ITT| |collection table|
+        +----------+   +-------+ <-------- +------------+ +---+ -----------------+
+
++-------+  +-------+  +-------+  +-------+ +-----------------------+ +-----------------+
+| GICR  |  | GICR  |  | GICR  |  | GICR  | |LPI configuration table| |LPI pending table|
++-------+  +-------+  +-------+  +-------+ +-----------------------+ +-----------------+
+                                            (every GICR has own LPI pending table, 
++-------+  +-------+  +-------+  +-------+   but share LPI configuration table)
+| GICC  |  | GICC  |  | GICC  |  | GICC  | 
+|       |  |       |  |       |  |       | 
+| core0 |  | core1 |  | core2 |  | core3 | 
++-------+  +-------+  +-------+  +-------+ 
+```
+GICD主要是用来支持SPI的基本功能，GICR支持PPI/SGI的基本功能，ITS和GICR支持LPI的基
+本功能。对基本功能的支持主要包括：1. 记录中断路由信息和中断号(比如，对于一个输入
+的中断信号，最终GIC把它报给哪个CPU，GIC报给CPU的硬件中断号是多少)，2. 记录各个中
+断的状态、开关、优先级等信息。
+
+分别看下每种中断，对应的信息是怎么记录的。
+
+SPI的路由信息和各种状态信息保存在硬件里，通过GICD上的大量寄存器搞定，这里的设计
+感觉比较丑陋，注意，SPI的物理中断号是定死的，也就是说GIC的SPI中断线的输出和最终
+ICC_IARn_EL1上报的数值是硬件已经固定的。
+
+PPI/SGI的各种状态信息保存在GICR的寄存器上，PPI/SGI一共也没有几个中断，而且都和CPU
+核相关，放到和CPU核一一对应的GICR寄存器上是合理的。PPI/SGI不存在路由信息，PPI总是
+发往本核的，SGI在触发的时候就指定了接收SGI的目标CPU核。
+
+LPI的各种状态保存在LPI相关的各种表格里，其中全局的LPI configuration table保存所有
+LPI的优先级和enable情况，LPI pending table保存每个中断的inactive/pending状态。LPI
+的这两个表格是基础概念，对应物理CPU和vCPU都有这样的概念。(todo: 如何配置这些状态?)
+
+LPI的路由信息保存在如上的device table、ITT、collection table里。对于ITS表格里的
+信息，软件需要通过向command queue下发comand的方式更新，表格的具体格式是硬件实现
+相关的。具体command在如下GIC编程接口里总结。
+
+用内存中的表格保存信息，一般都会在设备上放cache，GIC也是一样。有了设备的cache，
+就会有同步的需求，GIC使用command无效化ITS中cache的配置信息，具体命令在如下GIC
+编程接口介绍中。
+
+GIC和关联模块的接口
+--------------------
+
+PPI主要是做Timer的中断，Timer的中断信号和PPI的输入相连。
+
+SGI做IPI，CPU写ICC_SGI0R_EL1/ICC_SGI1R_EL1/ICC_ASGI1R_EL1触发SGI。
+
+外设的线中断可以直接接在GIC上做SPI中断。外设通过写GITS_TRANSLATER这个MMIO寄存器
+触发LPI，PCIe设备的MSI靠LPI来实现，MSI写的内容包括PCIe设备的BDF + eventID，GIC拿
+到这个信息后会根据提前配置好的信息查找对应的INTID以及路由信息，并根据提前配置的
+路由信息，把中断信号送到对应的CPU。
+
+hypervisor可以写ICH_LRn_EL2向vCPU注入中断。(todo: 展开细节)
+
+GIC编程接口
+------------
+
+GIC中保存的各种状态和路由信息可以通过GIC的编程接口进行操作。这里如下ICC/ICV/ICH
+开头的都是系统寄存器，其它的都是MMIO寄存器，这个在后面虚拟化模拟中在KVM走的是不同
+的处理路径。
+
+GICC寄存器：
+
+GIC CPU核一侧的编程接口我们这里先叫做GICC，这一部分的接口有MMIO和CPU系统寄存器的
+不同形式，如果是MMIO实现的，GIC协议里叫GICC，如果是系统寄存器实现的，协议里叫
+ICC_xxx_ELx、ICV_xxx_ELx、ICH_xxx_ELx。其中，前两种是中断业务要使用的寄存器，一个
+在host上使用，一个在虚拟机里使用，第三种是对虚拟中断的配置寄存器，在hypervisor里
+使用。
+
+ICC_xxx_ELx/ICV_xxx_ELx的设计逻辑和系统寄存器虚拟化的设计逻辑是一样的，这两组寄存
+器在功能上基本上是一一对应的，软件实际访问的时候看到的寄存器名字也是ICC_xxx_ELx，
+只不过软件在host下实际访问的寄存器是ICC_xxx_ELx，而在guest下实际访问的寄存器是
+ICV_xxx_ELx。
+
+这里看起来ICC/ICV寄存器的语意是一样的，其实在同一时刻，它们代表着不同的上下文语意。
+比如，host上的vCPU线程在被host上的中断打断的时候，软件要保存的上下文有vCPU这个机
+器的上下文和host线程自己的上下文，其中vCPU的上下文就包括ICV相关寄存器。
+
+ICC_IAR0/1_EL1:                             CPU从这个寄存器读到INTID。
+ICC_SGI0/1_EL1:                             CPU通过这个寄存器发SGI中断。
+ICC_EOIR0/1_EL1:                            CPU通过这个寄存器给中断发EOI。
+ICC_CTRL_EL1/3:                             各种中断功能的控制寄存器。
+ICC_IGRPEN0/1_ELn(interrupt group enable):  中断group的使能寄存器。
+ICC_SRE_ELn(system register enable):        IRQ/FRQ/ERROR中断的使能位。
+ICC_PMR_ELn(priority mask register):        中断优先级过滤的配置。
+
+ICV_xxx_ELx在guest里使用，寄存器和如上ICC_xxx_ELx的寄存器一样。
+
+ICH_AP1R<n>_EL2:
+ICH_VTR_EL2:                                GIC虚拟化相关的规格配置寄存器。
+ICH_HCR_EL2:                                GIC虚拟化的核心控制寄存器。
+ICH_LR<n>_EL2:                              虚拟中断注入寄存器。
+ICH_ELRSR_EL2
+ICH_EISR_EL2
+ICH_MISR_EL2: 
+
+GICR寄存器:
+
+todo: ...
+
+GICD寄存器:
+
+todo: ...
+
+ITS寄存器:
+
+ITS的寄存器以64KB为划分，GICv3/v4.0有两个64KB，GICv4.1以及以后有3个64KB。第一个
+64KB放控寄存器，第二个64K放MSI的doorbell寄存器，第三个64K放vSGI有关的寄存器，目前
+看就是一个GITS_SGIR。
+
+ITS的控制寄存器是很少的：GITS_CTRL是ITS的全局控制寄存器，GITS的配置是靠command
+queue下发的，所以需要有寄存器定义这个command queue，其中GITS_CBASER是队列的base，
+GITS_CREADR/GITS_CWRITER是队列的读取指针和写入指针，软件向队列中写入命令，硬件从
+队列中读命令。GITS_BASER<n>(n 0-7)，这些寄存器定义Device Table、Collection Table、
+vPE table的基地址，其中寄存器里的Type域段描述当前寄存器具体定义哪个表的基地址。
+这里预留了一些寄存器没有用，估计是为了以后扩展。
+
+ITS在第二个64KB上现在只留了一个GITS_TRANSLATER寄存器用来接收MSI中断，从协议上看
+这个寄存器中写的内容是EventID，那DeviceID是通过message中的其它域段承载？总之，ITS
+在收到DeviceID/EventID后，以DeviceID做Device Table Entry的索引找见设备对应的ITT表，
+以EventID做ITT entry的索引找见对应的Collection Table entry和pINTID，其中Collection
+Table entry里保存着当前中断要被送往的PE ID。
+
+(todo: GITS_TRANSLATER地址是host和VM公用的?)
+
+需要注意的是，如果对应中断是个虚拟中断，ITT entry的输出是vINTID、vPE号或者是一个
+物理LPI，vPE ID继续作为vPE table的索引找见vPE entry，其中保存当前vPE对应的GICR和
+vPE的vLPI pending table的base，其中保存的GICR实际上表示vPE可能运行的物理核，vPE
+当前可能在位也可能不在位。这里会有硬件检测机制判断vPE是否在位，如果在位就直接报
+中断到当前vPE的上下文上(GIC4.[01])，如果不在位，中断信息会记录在vLPI pending table
+里，也可以根据配置，给物理核报一个物理LPI。
+
+ITS协议并没有定义表里具体的格式，具体实现者需要在GITS_BASER<n>需要提供表格的entry
+size，这样软件就可以根据情况，决定分配多少内存。(todo: 软件如何处理内存一次没有分够?)
+
+ITS中的这些中断配置，需要软件提前通过ITS命令配置到ITS的各种表里。我们关注ITS这些
+命令的输入参数。
+
+如下是ITS命令总结:
+
+- MAPD device_id, ITT_base, ITT_size 
+
+把device_id到ITT表的映射写入device table。(todo: device table怎么告诉GIC?)
+
+- MAPI device_id, event_id, collection_id
+- MAPTI device_id, event_id, INTID, collection_id
+
+如上的命令是把(device_id, event_id)->INTID的对应关系告诉硬件，并且把collection
+table中的索引collection_id也告诉硬件。后面中断流程中就可以用(device_id, event_id)
+作为输入，得到(INTID，collection_id)的输出。注意，这里collection table的base需要
+提前配置到ITS上。
+
+- MAPC collection_id, target_GICR 
+
+配置collection table的collection_id entry里的目标GICR。所以，要把一个中断改报到
+其它CPU核上，只要改这里的配置就好，但是这里只是把配置通路改了，已经保存在之前GIC
+R中的中断状态还要被移动到新的GICR上，所以《GICv3 and GICv4 Software Overview》中
+给的comand序列是：MAPC collection_id, RD2 -> SYNC RD2 -> MOVALL RD1, RD2 -> SYNC RD1。
+(todo: 这里是对一个中断重新映射，MOVALL的参数没有了具体中断?)，MOVALL把GICR中pending
+的中断信息从RD1移动到RD2上。
+
+- MOVI device_id, event_id, new_collection_id
+
+如上文档中基于MOVI给了另外一种改变中断CPU的command序列：
+MOVI device_id, event_id, new_collection_id -> SYNC RD1。这样SYNC同样暗指把RD1中
+的pendin信息同步到new_collection_id对应的RD2中。(todo: 对这里的理解有误?)
+
+- DISCARD device_id, event_id
+
+丢掉ITT表里中断对应的map信息，去掉(pending表?)里的pending信息，清GICR的cache，以及
+丢掉对应的中断请求。也就是把对应中断的记录以及map信息全部清理掉。
+
+- INV device_id, event_id
+
+清对应中断在GICR中的LPI config table缓存。
+
+- CLEAR device_id, event_id
+
+清对应中断在GICR中的pending table缓存。
+
+中断路由控制
+-------------
+
+如上，我们已经考虑了中断路由信息的保存方式以及编程接口。
+
+其实，如果我们更加全面的看待中断路由，就应该把中断路由到不同CPU的不同EL层级也考
+虑进来，相关逻辑和虚拟化有关系。
+
+首先对于一个中断，硬件是知道它是物理中断还是虚拟中断的。一个中断报道core后，根据
+是物理还是虚拟中断，core当前EL级别，某些系统寄存器配置，具体报给core的哪个EL级别。
+
+当HCR.IMO为1时，所有物理中断被路由到EL2处理。
+
+vtimer PPI路由配置。一个core上的PPI中断被分给各种EL下的timer使用，分给EL1 vtimer
+的是27号PPI。KVM应该是把这个中断配置给配置给EL2处理，EL2再向VM注入时钟中断。(todo)
+
+vSGI/vLPI路由配置。当vCPU在位的时候，中断直接被vCPU的EL1 taken，当vCPU不在位的时候，
+中断被保存在pending表里，如果配置doorbell中断，触发doorbell中断，并被EL2 taken。
+
+vSPI的路由配置(e.g. UART)。通过LR寄存器注入vCPU(todo)，应该需要qemu介入。
+
+中断优先级
+-----------
+
+todo: ...
+
+中断虚拟化
+-----------
+
+我们这里先只看GIC硬件对于中断虚拟化的支持。GIC的KVM模拟方案中，GICD/GICR/ITS都是
+用软件模拟的，访问对应模块的寄存器会trap的KVM里，KVM调用host上的GIC驱动把guest的
+中断(虚拟中断)的硬件通路配置好，这样vCPU的中断实际报上来时就可以沿着之前配置好的
+硬件通路报到hypervisor(KVM)或者vCPU。KVM对GIC的模拟是独立的逻辑，在独立的文档里
+再描述吧。
+
+虚拟中断可以被送到vCPU要解决两个问题: 一个是GIC里需要维护虚拟中断的路由和状态信息，
+这就需要有配置和维护如上信息的接口和硬件支持；一个是要解决怎么把中断发给vCPU，host
+上的中断没有这个问题，中断来了，硬件直接切到对应的EL状态去处理，vCPU可能在运行，
+也可能不在运行，对于在运行的vCPU，虚拟中断可以直接发给它(打断其运行，使其执行流
+跳到中断处理向量)，对于下线的vCPU，虚拟中断可以由hypervisor(KVM)接管，hypervisor
+再向对应的vCPU中注入虚拟中断。
+
+GICv3不支持中断直通，虚拟中断必须先报到KVM里，KVM通过ICH_LRn_EL2注入vCPU。各种
+类型的中断都通过该接口注入虚机。(todo: 怎么配置这里)
+
+GICv4虚拟化下的各种配置表如下，我们这里先只考虑GICv4.1的情况，GIC4.0不是这样。
+```   
+                                           Memory:
+
+        +----------+   +-------+           +------------+ +---+ +---------+
+        |   GICD   |   |  ITS  | --------> |device table| |ITT| |vPE table|
+        +----------+   +-------+ <-------- +------------+ +---+ ----------+
+                                            +-----------------+
+                                            |vPE config table |
++-------+  +-------+  +-------+  +-------+  +-----------------+    +------------------+
+| GICR  |  | GICR  |  | GICR  |  | GICR  |->|vPEx             |--->|vLPI pending table|
++-------+  +-------+  +-------+  +-------+  |                 |    +------------------+
+                                            |                 |----->+------------------------+
++-------+  +-------+  +-------+  +-------+  +-----------------+ +--->|vLPI configuration table|
+| GICC  |  | GICC  |  | GICC  |  | GICC  |  |...              | |    +------------------------+
+|       |  |       |  |       |  |       |  +-----------------+ |  +------------------+
+| core0 |  | core1 |  | core2 |  | core3 |  |vPEy             |-+->|vLPI pending table|
++-------+  +-------+  +-------+  +-------+  |                 | |  +------------------+
+                                            |                 |-+
+                                            +-----------------+
+ (every GICR has own vLPI pending table,  but share vLPI configuration table)    
+```
+虚拟化下的vLPI pending table和vLPI configuration table还是原来的语意，增加了vPE
+table和vPE configure table，其中vPE table是一个逻辑概念，物理上根据配置，vPE table
+可以是一个私有的表，也可以直接就是vPE configure table，vPE table保存vPE和GICR的
+对应关系，表示vPE当前"所在"的物理CPU，注意当说vPE在一个物理CPU上时，表示vPE线程
+在这个物理CPU上参与调度，所以vPE可能在线物理CPU，也可能是下线的状态。当直接用
+vPE config table做vPE table时，使用GITS_BASER2寄存器标记vPE config table的地址。
+vPE是否在线使用GICR_VPENDBASER.vPEID域段表示。
+
+GICv4.0/4.1中维护中断路由和状态信息的设计是基本一致的，GIC4.0在GICv3的基础上增加
+了中断直通，GIC4.1改进了中断直通并且增加了vSGI的直通。但是，GIC4.0和GIC4.1在协议
+上是不兼容的，感觉这里设计的很糟糕。如下的这些带V前缀的命令是GICv4里新加的，GICv3
+里没有。
+
+- VMAPI device_id, event_id, vPEID, doorbell
+- VMAPTI device_id, event_id, vPEID, vINTID, doorbell
+
+和MAPI/MAPTI的功能一样，不过这里的映射多了vPEID，就是告诉硬件对应的中断要发给哪
+个vCPU。doorbell中断是无法直通的时候(vCPU不在位)需要触发的host上的中断。
+
+- VMAPP vPEID, RD_base, VPT_addr, VPT_size (4.0)
+	vPEID, RD_base, VPT_addr, VPT_size, V (4.1)
+
+告诉硬件某个vCPU上的中断发往哪个物理CPU，并把这个vCPU的VPT表的base/size信息告诉
+硬件。一个虚拟中断报给GICR，GICR判断对应的vCPU是否在位就是通过虚拟中断信号中携带
+的vCPU相关信息和GICR中标记的vCPU信息做对比。对于中断直通的基本逻辑，GIC和RISCV的
+AIA其实都是一样的。可以看到VMAPP和VMAPI/VMAPTI的逻辑是独立的。
+
+对于GICv4.1，vCPU上线的时候，vPEID被保存到GICR_VPENDBASER.vPEID，表示当前物理核
+上在位的vCPU，硬件根据该信息决定是直通虚机中断还是把中断记录在虚机pend表里。
+
+- VMOVP vPEID, RD_base, ITS_list, Sequence_number (v4.0)
+- VMOVP vPEID, RD_base, ITS_list, Sequence_number, doorbell (v4.1)
+
+- VMOVP vPEID, RD_base
+
+把一个vCPU上的中断重新配置发往另一个GICR(另外一个物理CPU)，如果doorbell是1023，
+就不会再报doorbell中断。vCPU到物理核的映射可能存在多个ITS，所以这里要对所有ITS
+都操作下。如果GITS_TYPE.VMOVP = 1，硬件自身支持在不同的ITS上同步vCPU到物理CPU的
+映射。
+
+- VMOVI device_id, event_id, vPEID, doorbell
+
+去掉一个虚拟中断的映射。
+
+- VINVALL ICID?
+
+todo: 清cache。
+
+GICv4.1中增加了vSGI直通，GICv3和GICv4.0中，一个vCPU给另外一个vCPU发送SGI，发送方
+会trap到KVM里，KVM再向接收方GICR发信息，接收方GICR会给接收方CPU发中断，接收方CPU
+进入KVM，在KVM里注入中断。GICv4.1中的vSGI直通，是对后半段做了优化，发送方KVM在向
+接收方注入SGI中断的时候，如果当时接收方vCPU正好在位，SGI可以直通vCPU。
+
+接收方GICR可以根据如上LPI直通的配置确定是否vCPU在位(?)，但是GICR还需要知道vSGI
+的其它配置信息，这些配置信息包括是否enable、优先级、中断group等。GIC现在的设计是
+把这些信息塞到了vLPI的pending table表的空余空间里，然后新增加了一个VSGI的命令去
+下对应的配置。似乎GIC最初设计没有考虑到这里，这里打了一个丑陋的打补丁。
+
+- VSGI vPEID, vINTID, enable, group, priority, clear
+
+vLPI的逻辑
+-----------
+
+vLPI的基本逻辑可以参考[这里](https://wangzhou.github.io/ARM64-LPI虚拟化基本逻辑/)。
+
+vSGI的逻辑
+-----------
+
+vSGI的基本逻辑可以参考[这里](https://wangzhou.github.io/ARM64-SGI虚拟化基本逻辑/)。
+
+vPPI的逻辑
+-----------
+
+vPPI的基本逻辑可以参考[这里](https://wangzhou.github.io/ARM64时钟虚拟化基本逻辑/)。

@@ -1,0 +1,105 @@
+---
+title: KVM中WFI/WFE的基本逻辑
+tags:
+  - 虚拟化
+  - KVM
+description: 本文分析Linux内核KVM中ARM WFX指令模拟的基本逻辑。基于内核版本v6.11-rc7。
+abbrlink: 17276
+date: 2025-04-12 19:44:50
+categories:
+---
+
+基本逻辑
+---------
+
+这里的WFX指令指WFI/WFE/WFIT/WFET，带T后缀的指令是对应指令带超时的版本。
+
+ARM KVM整体的逻辑见: Linux内核ARM64 KVM虚拟化的基本逻辑。WFI指令的语意是把core
+进入低功耗，等待中断唤醒继续执行，所以，guest里执行到WFI时，系统完全可以把vCPU
+线程调度出去，换host上的其它线程执行，直到有中断发到vCPU上，KVM再把vCPU线程调度
+回来执行。
+
+WFI在EL1执行可以trap到EL2，完成如上的逻辑。在支持GICv4.0/v4.1的系统上，直接注入
+guest的vLPI中断支持附带host doorbell中断的功能，当被注入vLPI的vCPU线程不在线时，
+硬件可以给host发doorbell中断，这样KVM就可以及时的把vCPU上线，注入的vLPI中断也就
+被及时的响应了。
+
+WFE的虚拟化处理逻辑和WFI的逻辑基本一致，不过WFE是直接换一个vCPU的线程来跑。
+
+当物理核上只有一个vCPU线程在跑的时候，wfi/wfe没有必要再做trap，KVM在上线CPU的时候
+把wfe/wfi都配置为不再trap，所以它们是实际执行的。从host上就是vCPU线程一直有指令
+在运行，不管是正常跑还是做wfi。所以，host上看到host的CPU占用率是100%。
+
+对于WFxT，KVM只是加了查询超时的一个动作，如果trap到KVM里处理的时候已经超时，就不
+处理直接返回了，如果没有超时就和如上wfe/wfi的处理逻辑一样。
+
+代码分析
+---------
+
+WFI的调用链是: handle_exit -> handle_trap_exceptions -> kvm_handle_wfx，虽然是
+系统指令的trap模拟，ARM还是转门给WFI做了标记。(不是在公用的kvm_handle_sys_reg里处理)
+```
+kvm_handle_wfx
+      /* wfe的处理逻辑，可以看到wfe是直接换一个vCPU线程来跑 */
+  +-> kvm_vcpu_on_spin
+    +-> kvm_vcpu_yield_to
+      +-> yield_to
+
+  +-> kvm_vcpu_wfi
+    +-> vcpu_set_flag(vcpu, IN_WFI)
+
+    +-> kvm_vgic_put
+    | +-> vgic_v3_put
+    |       /* todo: vcpu下线，vgic要做什么处理 */
+    |   +-> vgic_v4_put
+    |         /* 在WFI处理中需要enable doorbell中断 */
+    |     +-> its_make_vpe_non_resident(vpe, !!vcpu_clear_flag(vcpu, IN_WFI))
+
+    +-> kvm_vcpu_halt
+    | +-> kvm_vcpu_block
+    |       /*
+    |        * 注意这里把vCPU线程移除了run queue，后续在doorbell中断里唤醒vCPU线程。
+    |        * 如果没有doorbell中断，vCPU线程将会一直不被唤醒。注意，doorbell中断
+    |        * 的处理见下面分析。
+    |        */
+    |   +-> set_current_state(TASK_INTERRUPTIBLE)
+    |   +-> schedule
+
+    +-> vcpu_clear_flag(vcpu, IN_WFI)
+    +-> vcpu_clear_flag(vcpu, IN_WFI)
+    +-> kvm_vgic_load
+```
+
+doorbell中断处理函数在arch/arm64/kvm/vgic/vgic-v4.c里注册。
+```
+vgic_v4_init
+      /* 每个vCPU注册一个 */
+  +-> vgic_v4_request_vpe_irq
+    +-> request_irq(irq, vgic_v4_doorbell_handler, 0, "vcpu", vcpu)
+```
+
+doorbell中断处理里出发vCPU上线，vCPU上线后机会马上响应pending的中断。
+```
+vgic_v4_doorbell_handler
+  +-> kvm_vcpu_kick
+    +-> kvm_vcpu_wake_up
+      ...
+```
+
+上面提到的，只有一个vCPU线程在运行，wfe/wfi关trap的逻辑子在：
+```
+kvm_arch_vcpu_load
+  +-> kvm_vcpu_should_clear_twe
+    +-> vcpu->arch.hcr_el2 &= ~HCR_TWE;
+  +-> kvm_vcpu_should_clear_twi
+    +-> vcpu->arch.hcr_el2 &= ~HCR_TWI;
+```
+
+相关问题
+---------
+
+host调度vCPU线程上下线的时候，会调用到kvm注册给调度器的回调函数kvm_sched_out/in。
+
+host上中断处理中，是否会调用kvm_sched_out/in? 对于非抢占内核，中断打断当前的内核
+执行流程，在中断执行完成后，应该继续返回被打断的点执行，而不执行内核抢占，所以会
+调用kvm_sched_out/in么？

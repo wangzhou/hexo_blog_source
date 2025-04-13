@@ -2,6 +2,7 @@
 title: kvm unit test速记
 tags:
   - 虚拟化
+  - 软件测试
 description: kvm-unit-test的一个使用速记
 abbrlink: 62297
 date: 2025-01-19 22:26:52

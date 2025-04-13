@@ -1,0 +1,116 @@
+---
+title: Linux内核CPU online/offline的基本逻辑
+tags:
+  - Linux内核
+description: 本文分析Linux中CPU online/offline的实现逻辑。
+abbrlink: 57757
+date: 2025-04-12 20:57:38
+categories:
+---
+
+
+online/offline使用
+-------------------
+
+ 比如，我们可以通过sysfs把一个核下线，写1又可以把这个核上线。
+```
+ echo 0 > /sys/devices/system/cpu/cpu3/online
+```
+ 一个核被下线，相当于把这个core关掉，从新上线的核从初始状态开始运行。
+
+实现逻辑
+---------
+
+ 可见内核把CPU核也当作一种设备管理，那么就有核对应的设备、总线和驱动。内核定义了
+ cpu bus: struct bus_type cpu_subsys，一个cpu用struct cpu表示，
+
+对固件的需求
+-------------
+
+kernel/sched/idle.c
+```
+ do_idle
+   +-> arch_cpu_idle_dead
+     +-> cpu_ops[]->cpu_stop()
+
+ play_idle_precise
+   +-> do_idle
+
+ cpu_startup_entry
+   +-> do_idle
+```
+
+ cpu device
+
+```
+driver_init
+      /* drivers/base/cpu.c */
+  +-> cpu_dev_init
+        /*
+         * 注册cpu的sysfs接口，online/offline的入口就在这里: struct bus_type cpu_subsys
+         * 的回调函数中: .online/.offline。
+         */
+    +-> subsys_system_register(&cpu_subsys, cpu_root_attr_groups)
+    +-> cpu_dev_register_generic
+      +-> register_cpu
+```
+
+```
+cpu_subsys_online
+  +-> cpu_device_up
+    ...
+      +-> _cpu_up
+        +-> cpuhp_up_callbacks
+          ...
+                /* 循环调用cpuhp_state的回调 */
+            +-> __cpuhp_invoke_callback_range
+                  /* 每次调用这个，可以看到每次回调前后都有trace点 */
+              +-> cpuhp_invoke_callback
+```
+
+所有的cpuhp_state定义在include/linux/cpuhotplug.h，每个具体的cpuhp_state的cpuhp_step
+定义在kernel/cpu.c: cpuhp_hp_states，其中的CPUHP_BRINGUP_CPU的回调为bringup_cpu。
+```
+ bringup_cpu
+       /* arch/arm64/kernel/smp.c */
+   +-> __cpu_up
+     +-> boot_secondary
+           /*
+            * 回调定义在arch/arm64/kernel/psci.c: cpu_psci_cpu_boot。注意，这个
+            * 函数把cpu编号转成mpidr，这个转换关系是提前解析，然后保存在
+            * __cpu_logical_map这个表里。CPU核的mpidr是从ACPI MADT表的GICC mpidr
+            * 域段解析到的，解析的具体路径为: (NUMA node的解析也在这里)
+            *
+            * smp_init_cpus->acpi_parse_and_init_cpus->acpi_table_parse_madt
+            */
+       +-> ops->cpu_boot
+             /* 不同版本的psci_ops定义在: drivers/firmware/psci/psci.c */
+         +-> psci_ops.cpu_on
+               /*
+                * 以0.2版本为例。
+                * 
+                * 根据FADT.arm_boot_flags决定是用SMC还是用HVC(在psci_acpi_init())。
+                * psci_acpi_init->psci_probe中探测psci版本。
+                */
+           +-> psci_0_2_cpu_on
+
+         /* 等待online的CPU运行secondary_start_kernel，其中会解开这里的等待 */
+     +-> wait_for_completion_timeout(&cpu_running, xxx)
+     +-> if (cpu_online(cpu)) return 0;
+         ...
+```
+
+以SMC为例，展开psci_0_2_cpu_on的逻辑：
+```
+psci_0_2_cpu_on
+  +-> __psci_cpu_on(PSCI_FN_NATIVE(0_2, CPU_ON), cpuid, entry_point)
+        /* function_id为PSCI_0_2_FN64_CPU_ON */
+    +-> invoke_psci_fn(fn, cpuid, entry_point, 0)
+      +-> arm_smccc_smc(function_id, arg0, arg1, arg2, 0, 0, 0, 0, &res)
+            /* arch/arm64/kernel/smccc-call.S，smc为核心的一断汇编在这里 */
+        +-> __arm_smccc_smc
+
+               /* 虚机里执行smc，trap到KVM一路执行到arch/arm64/kvm/psci.c如下函数 */
+           +-> kvm_psci_vcpu_on(vcpu)
+```
+kvm_psci_vcpu_on reset vCPU，把vCPU线程投入执行。

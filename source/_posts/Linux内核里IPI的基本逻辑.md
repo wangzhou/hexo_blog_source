@@ -1,0 +1,86 @@
+---
+title: Linux内核里IPI的基本逻辑
+tags:
+  - Linux内核
+  - 中断
+description: 分析Linux内核里ARM体系结构下IPI中断的基本逻辑。
+abbrlink: 33182
+date: 2025-04-12 20:55:33
+categories:
+---
+
+基本逻辑
+---------
+
+CPU直接可以通过核间中断(IPI)相互之间发中断，ARM上使用SGI支持核间中断。其中SGI的
+基本逻辑可以参考[这里](https://)，ARM KVM的vSGI的基本逻辑可以参考[这里](https://)。
+
+Linux内核里，基于IPI封装的接口在include/linux/smp.h。基本的接口如下：
+```
+smp_call_function(func, info, wait) 
+smp_call_function_many(mask, func, info, wait)
+...
+```
+如上函数的语意是，在所有online CPU或者特定CPU上执行对应的函数，wait为true表示调
+用者同步等待相关函数执行完。
+
+代码分析
+---------
+
+一个IPI中断应用的例子。
+```
+wake_up_process
+  +-> try_to_wake_up(p, TASK_NORMAL, 0)
+    +-> ttwu_queue
+      +-> ttwu_queue_wakelist
+        +-> __ttwu_queue_wakelist
+          +-> __smp_call_single_queue          <--- IPI的封装接口
+            +-> send_call_function_single_ipi
+              +-> arch_send_call_function_single_ipi // arch/arm64/kernel/smp.c
+                    /* smp_cross_call给一个core发IPI可以带ipinr，硬件层面是中断号。*/
+                +-> smp_cross_call(cpumask_of(cpu), IPI_CALL_FUNC)
+                  +-> __ipi_send_mask(ipi_desc[ipinr], target)
+                    +-> chip->ipi_send_mask(data, dest) // gic_ipi_send_mask
+```
+
+GICv3的IPI回调函数：
+```
+/* drivers/irqchip/irq-gic-v3.c */
+gic_ipi_send_mask
+  +-> gic_send_sgi
+    +-> gic_write_sgi1r
+      +-> write_sysreg(val, ICC_SGI1R)
+```
+
+注册SGI中断的入口函数：
+```
+/* drivers/irqchip/irq-gic-v3.c */
+gic_smp_init
+  +-> irq_domain_alloc_irqs
+  +-> set_smp_ipi_range
+        /* arch/arm64/kernel/smp.c，为每个CPU注册相关IPI */
+    +-> request_percpu_irq(ipi_base + i, ipi_handler, "IPI", ...)
+```
+
+所以，收到IPI中断的core的处理逻辑是：
+```
+ipi_handler
+  +-> do_handle_IPI(irq - ipi_irq_base)
+        /* IPI的中断号区分不同种类的IPI */
+    +-> switch (ipinr)
+      +-> IPI_RESCHEDULE
+          IPI_CALL_FUNC
+          IPI_CPU_STOP
+          IPI_CPU_CRASH_STOP
+          IPI_TIMER
+          IPI_IRQ_WORK
+          IPI_CPU_BACKTRACE
+          IPI_KGDB_ROUNDUP
+```
+
+IPI测试工具
+------------
+
+社区有一个IPI的benchmark工具[ipi_benchmark](https://lkml.org/lkml/2017/12/19/141)，不过这个小工具还没有在Linux内核主线。
+这个工具反复使用IPI在特定CPU上执行函数，并记录发起IPI和函数开始执行之间的时间差值。
+可以利用这个工具测试系统IPI的延时性能，特别是可以测试虚拟化场景下IPI的延时性能。

@@ -1,0 +1,168 @@
+---
+title: ARM64 SGI虚拟化基本逻辑
+abbrlink: 46996
+date: 2025-04-12 19:45:47
+tags: [虚拟化, KVM, 中断]
+description: "本文整理ARM KVM中vSGI实现的基本逻辑。"
+categories:
+---
+
+基本逻辑
+---------
+
+物理SGI通过写ICC_SGI0R_EL1/ICC_SGI1R_EL1/ICC_ASGI1R_EL1触发。虚拟化下，vCPU写对
+应的寄存器会触发trap到KVM。GICv3/v4.0需要通过list register向vCPU注入vSGI，GICv4.1
+支持vCPU在线的时候通过GITS_SGIR寄存器直接向vCPU注入vSGI。
+
+如上的三个寄存器用来区分group和security，具体又和所在的EL级别有关系。ICC_SGI0R_EL1
+表示触发一个group0的SGI，在各个特权级下，group0都是FIQ；ICC_SGI1R_EL1表示触发一个
+group1的SGI，security类型和当前PE相同；ICC_ASGI1R_EL1也是触发group1的SGI，只是
+security类型和当前PE不一样。
+
+如上各个寄存器的标记SGI的目标CPU、中断号以及是否做广播。
+```
+       55     48      40  39     32        27  24 23     16 15        0
++-----+---------+----+---+---------+------+------+---------+-----------+
+|     |affinity3|    |IRM|affinity2|      |SGI ID|affinity1|target list|
++-----+---------+----+---+---------+------+------+---------+-----------+
+```
+使用affinity3/2/1以及target list标记系统里的CPU，这个和MPIDR_EL1寄存器标记CPU的
+语意是一致的。IRM为1表示向所有CPU广播，IRM为0才用如上affinity/target list域段指定
+目标CPU。
+
+其中，如上寄存器的target list和MPIDR_EL1的affinity0有所不同，前者16个bit表示具体
+affinity1下的16个CPU，所以GIC支持向一个affinity1下的多个CPU发SGI多播。而MPIDR_EL1
+的affinity0用8bit的位宽表示一个数。这里的设计看起来是对不上的。
+
+ICH_HCR_EL2.TC控制访问相关寄存器是否trap到EL2。
+
+GICv3/v4.0 vSGI需要使用list register由KVM注入vCPU。todo: ...
+
+GICv4.1时，KVM通过写GITS_SGIR寄存器直接注入vSGI，GITS_SGIR使用vPEID和vINTID表示
+目标vCPU和SGI中断号。KVM需要把收到的affinity3/2/1+target list转换成vPEID，然后使
+用GITS_SGIR发送vSGI。
+
+ARM KVM下，vCPU中MPIDR_EL1由vcpu_id在KVM中转换计算得到对应的MPIDR_EL1的值，KVM保
+存MPIDR_EL1和vPEID的映射关系。注意，vcpu_id在每个VM里，从0开始依次编号；MPIDR是
+ARM下硬件标记CPU编号的方式；vPEID是GIC视角的vCPU编号，在host上这个是vCPU的唯一编
+号。
+
+直接使用GITS_SGIR还需要哪些前置的配置？KVM配置ITS的寄存器把信息传给硬件，硬件需
+要知道vCPU当前在哪个物理CPU上，才能转发给对应的GICR；GICR需要知道vCPU当前是否在线，
+在线直接注入，不在线就把信息记录下，触发doorbell中断，doorbell中断处理里触发vCPU
+上线响应vSGI中断。所以，这里至少需要这两个对应的前置配置，第一个配置复用VMAPP/VMOVP
+等配置，其实就是在vPE table里找见对应vPE对应的GICR，第二是否在线的配置也是复用vPE
+是否在线的检测，即vPE table里保存的LPI pending table是否和GICR上配置的一样。除此
+之外，增加VSGI命令: 
+```
+VSGI vPEID, vINTID, enable, group, priority, clear
+```
+这个命令配置一个vSGI中断的基本信息。这些基本信息是保存在LPI pending table的空余
+空间里。
+
+另外，GICv4.1的SGI直通是个半虚拟化的特性。GICD_TYPE2.nASSGIcap表示是否支持SGI直通，
+guest内核驱动配置GICD_CTL.nASSGIrep可以使能这个特性。GICD_TYPE2.nASSGIcap在host读
+的时候是0。kvm在模拟gicv3的时候把GICD_TYPE2.nASSGIcap暴露给了guest系统。这样guest
+内核gic驱动就可以检测并配置GICD_TYPE2.nASSGIrep。
+
+KVM代码分析
+------------
+
+具体到代码层面，vSGI大概可以分为"数据流"和"控制流"，前者是vCPU发起一个vSGI的流程，
+后者是之前为整个通路做的准备。
+
+"数据流"即为ICC_SGI1R_EL1 trap的逻辑。
+```
+kvm_handle_sys_reg
+  ...
+  +-> access_gic_sgi
+        /*
+         * 从affinity的语意转换到vPEID的语意。
+         */
+    +-> vgic_v3_dispatch_sgi
+      +-> vgic_v3_queue_sgi         // 得到vSGI对应的vgic_irq irq
+
+        +-> vgic_queue_irq_unlock                      <--- GICv3/v4.0的注入逻辑
+
+        +-> irq_set_irqchip_state(irq->host_irq, ...)  <--- GICv4.1的vSGI直通逻辑 
+          +-> chip->irq_set_irqchip_state
+                /*
+                 * GITS_SGIR触发vSGI的逻辑, 如下GICv4.1-sgi里的irq_set_irqchip_state，
+                 * 实际就是写GITS_SGIR寄存器。
+                 */
+            +-> its_sgi_set_irqchip_state
+                ...
+```
+
+下面看整个通路是怎么准备好的。
+
+GIC里有很多irq_chip和irq_domain，irq-gic-v3-its.c里有："GICv4-vpe"，"GICv4.1-vpe"，
+"GICv4.1-sgi"以及"ITS"对应的chip和domain，irq-gic-v3.c里有："GICv3"对应的chip和domain。
+GICv3/ITS是非虚拟化相关的，其它类型的chip/domain都和虚拟化有关系。irq_chip封装特
+定中断控制器的回调函数，irq_domain封装linux内核中断分配、中断映射等逻辑，内核给
+它管理的每个中断创建一个irq_desc，其中保存逻辑中断号、irq_data以及irq_chip。
+
+这里只看和SGI虚拟化相关的逻辑。
+```
+its_init
+      /*
+       * 初始化vpe_domain_ops以及sgi_domain_ops, 这两者都是在后面的its_alloc_vcpu_irq
+       * 里使用。而its_alloc_vcpu_irq是kvm初始化模拟gic时，vgic_v4_init里调用的。
+       *
+       * 其中vpe_domain_ops是its_vpe_domain_ops，sgi_domain_ops在GICv4.1时是
+       * its_sgi_domain_ops。
+       */
+  +-> its_init_v4
+```
+
+KVM里模拟GIC，初始化GIC的逻辑。这里会使用如上的vpe_domain_ops和sgi_domain_ops。
+```
+vgic_v4_init
+  +-> its_alloc_vcpu_irq
+    +-> vm->domain = irq_domain_create_hierarchy(gic_domain, 0, vm->nr_vpes,
+                                                 vm->fwnode, vpe_domain_ops, vm)
+    +-> vpe_base_irq = irq_domain_alloc_irqs
+
+        /* 对VM里的每个vCPU调用该函数，如下的逻辑和vSGI有关系 */
+    +-> its_alloc_vcpu_sgis
+      +-> irq_domain_alloc_named_id_fwnode
+      +-> vpe->sgi_domain = irq_domain_create_linear(vpe->fwnode, 16,
+                                                     sgi_domain_ops, vpe)
+          /* 为每个vCPU分配16个vSGI */
+      +-> sgi_base = irq_domain_alloc_irqs(vpe->sgi_domain, 16, NUMA_NO_NODE, vpe)
+            /* 为每个vSGI挂上its_sgi_irq_chip，即为GICv4.1-sgi irq_chip */
+        +-> its_sgi_irq_domain_alloc
+```
+
+vgic_irq里的host_irq获取逻辑如下，这个irq应该不是一个真实的irq，而是借助这个irq
+直接调用到了GICv4.1-sgi irq_chip中的vSGI操作函数。对vSGI使能/关闭/配置优先级等
+操作归根到底是在host上使用VSGI。
+```
+kvm_vcpu_ioctl KVM_RUN
+  ...
+  +-> vgic_v3_map_resources
+    +-> vgic_v4_configure_vsgis
+
+          /* 下线VM的所有vCPU */
+      +-> kvm_arm_halt_guest
+      +-> vgic_v4_enable_vsgis
+            /*
+             * 把上面sgi_domain中的irq传给对应的host_irq，通过对应的irq就可以直接
+             * 调用GICv4.1-sgi irq_chip里的回调。可以看到这些回调里调用的都是VSGI
+             * 命令。
+             */
+        +-> irq->host_irq = irq_find_mapping(vpe->sgi_domain, i)
+        +-> vgic_v4_sync_sgi_config(vpe, irq)
+        +-> irq_domain_activate_irq
+        +-> irq_set_irqchip_state
+          /*
+           * 上线VM的所有vCPU，这里面应该会有VMAPP的操作，就会把vPE到GICR的关系
+           * 告诉给硬件。
+           */
+      +-> kvm_arm_resume_guest
+```
+
+SGI内核代码分析
+----------------
+
+Linux内核SGI相关逻辑可以参考[这里](https://wangzhou.github.io/Linux内核里IPI的基本逻辑/)。
