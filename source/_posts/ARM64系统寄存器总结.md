@@ -183,20 +183,21 @@ regime，描述的是host的情况，只需要做stage1的翻译。
 可以看到，只有EL1&EL0 translation regime会使用到stage2翻译，就是只有虚拟机会使用
 到stage2翻译，host(包括hypervisor)自己只会使用stage1翻译。
 
-Stage1翻译相关的寄存器是TTBR_EL1/TCR_EL1，只不过在host上实际使用的就是它们本身，
-guest的stage1翻译实际使用的是TTBR_EL2/TCR_EL2。Stage2翻译相关的寄存器是VTTBR_EL2/
-VTCR_EL2。
+Stage1翻译相关的寄存器是TTBR_EL1/TCR_EL1，Stage2翻译相关的寄存器是VTTBR_EL2/VTCR_EL2。
+其中Stage1可能有两种情况，一种非虚拟化的情况，这种情况下又分nVHE/VHE，在nVHE下
+TTBR_EL1/TCR_EL1实际就是它本身，在VHE下访问TTBR_EL1/TCR_EL1实际访问的是TTBR_EL2/TCR_EL2；
+另一种是虚拟化情况，此时存在Stage1/Stage2翻译，其中Stage1翻译使用TTBR_EL1/TCR_EL1，
+Stage2翻译使用VTTBR_EL2/VTCR_EL2。
 
-todo: vtimer。
+timer虚拟化的逻辑和相关寄存器整理可以参考[这里](https://wangzhou.github.io/ARM64时钟虚拟化基本逻辑/)。vLPI的逻辑可以参考[这里](https://wangzhou.github.io/ARM64-LPI虚拟化基本逻辑/)。
+vSGI的逻辑可以参考[这里](https://wangzhou.github.io/ARM64-SGI虚拟化基本逻辑/)。
 
 todo: 普通外部中断虚拟化。
-
-todo: vLPI/vSGI/vNMI各自直接注入的逻辑。
 
 PMU相关寄存器
 --------------
 
-PMU基本逻辑和寄存器定义在独立的文档中描述。
+PMU基本逻辑和寄存器定义可以参考[这里](https://wangzhou.github.io/KVM中PMU的基本逻辑/)。
 
 GIC
 ----
@@ -204,12 +205,7 @@ GIC
 GIC有设备一侧的MMIO寄存器以及核一层的系统寄存器，这里只描述核一侧的系统寄存器。
 GIC核一侧的系统寄存器主要有：ICC_XXX_ELn/ICV_XXX_ELn/ICH_XXX_ELn。
 
-ICC_SRE_ELn, system register enable。
-ICC_PMR_ELn, priority mask register。
-ICC_CTRL_ELn, control completion of interrupt。
-ICC_IGRPEN1_ELn，interrupt group enable。
-
-需要在独立的文档中展开逻辑，再说吧。
+在独立的文档中展开逻辑，具体可以参考[这里](https://wangzhou.github.io/ARM-GIC硬件逻辑总结/)。
 
 SMMU
 -----
