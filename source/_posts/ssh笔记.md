@@ -30,3 +30,16 @@ ssh -p port_number user_name@remote_host
 如果远程服务器没有图形化界面，可以使用 ssh -X user_name@remote_host "command"
 (e.g. ssh -X user_name@remote_host "thunderbird"), 在远程服务器上运行命令command,
 而在本地机器上显示command的图形化输出。
+
+ssh远程执行命令同步等待远程命令完成，并把命令的输出显示在本地，可以把远程命令输出
+重定向到本地文件，方便后续查看。ssh返回远程执行命令的返回码。
+```
+ssh user_name@remote_host "command" > local_file
+```
+
+当使用ssh在远程主机上执行命令时，可能需要输入ssh密码，sshpass可以把ssh密码传给提
+供给ssh，这个在写自动化脚本的时候比较有用。我们可以这样使用sshpass给ssh传一个密码：
+```
+sshpass -p key_xxx ssh user_name@remote_host "command"
+```
+注意，如上命令的返回码也是远程执行命令的返回码。
