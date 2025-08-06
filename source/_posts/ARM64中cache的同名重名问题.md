@@ -88,5 +88,26 @@ icache上。如果只是fetch指令执行，也不会出问题，唯一可能出
 ARM上其它的cache都只能是PIPT cache，如上第一节中的分析，一般情况下，这些cache对
 软件都是透明的了。现代的SoC系统上，外设和CPU基本上也可以做到硬件维护cache一致性。
 
-TODO: PTW和cache之间的关系。
+下面看下ARM上关于cache的一些概念，ARM上cache相关的ID寄存器有CTR_EL0/CLIDR_EL1/
+CSSELR_EL1/CCSIDR_EL1/CCSIDR2_EL1。CTR_EL0.IDC=0表示需要把dcache clean到PoU同步
+点，CTR_EL0.DIC=0表示需要把icache invalidate到PoU同步点, PoU表示单核上icache和
+dcache的同步点，另外PoC表示多个核之间cache的同步点。
+```
+   +-----------+     +-----------+
+   | L1 icache |     | L1 dcache |
+   +-----------+     +-----------+
 
+          +------------+
+          |  L2 cache  |
+          +------------+
+```
+自修改代码和cache的逻辑大概是，被修改的代码可能缓存在L1 dcache，所以需要使用指令
+或者硬件同步到和icache的同步点(一般是L2 cache)，L1 icache/L2中旧的指令需要使用
+cache指令或者硬件自动清理掉。如上，如果IDC/DIC为1，那么硬件支持自动做对应的清理。
+
+CLIDR_EL1定义PoC/PoU等的同步点，一般PoU是L2，PoC是L3。CSSELR_EL1/CCSIDR_EL1/CCSIDR2_EL1
+的用法是，先配置CSSELR_EL1的值，指示想要读哪一级cache的信息，然后读后面两个寄存器，
+就可以得到对应cache的set/way等参数，ARM中提供按set/way invalid cache的指令，可以
+想象这些指令的使用场景是比较定制的，因为cache prefetch会把对应的set/way又填满。
+
+TODO: PTW和cache之间的关系。
