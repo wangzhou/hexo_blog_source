@@ -1,0 +1,94 @@
+---
+title: ARM_SMCCC的基本逻辑
+tags:
+  - SMCCC
+  - ARM64
+description: 本文总结ARM里SMCCC的基本逻辑，代码分析基于的Linux内核版本是6.14-rc5。
+abbrlink: 20798
+date: 2025-08-06 23:19:30
+categories:
+---
+
+什么是SMCCC
+------------
+
+SMCCC(SMC call convention)是ARM定义的一套SMC/HVC相关的访问标准。SMC使得系统trap
+到EL3，HVC使得系统trap到EL2，虚机上的软件也可以运行SMC指令，SMC这个时候有可能会
+根据配置trap到KVM(EL2)里，并模拟相关访问请求。完整协议可以从[这里](https://developer.arm.com/documentation/den0028/gbet0/?lang=en)下载。
+
+SMCCC围绕smc/hvc指令而来，使用寄存器传递输入参数和返回值。SMCCC对接口的种类进行
+了划分，具体编码到w0寄存器里。
+
+SMCCC接口的种类被划分为：Arm Architecture Calls，CPU Service Calls，SiP Service
+Calls，OEM Service Calls，Standard Secure Service Calls，Standard Hypervisor
+Service Calls，Vendor Specific Hypervisor Calls，Trusted Application Calls以及
+Trusted OS Calls。
+
+SMCCC协议里明确定义了Arm Architecture Calls的接口，并给PSCI、SDEI在Standard
+Secure Service Calls里保留了空间。
+
+Arm Architecture Call里定义的接口主要用来获取SMCCC的版本号、查询Arm Architecture
+接口是否实现、当前机器上ARM安全漏洞的情况(SMCCC_ARCH_WORKAROUND_1/2/3/4)。
+
+SMCCC在不断的升级版本，新的版本会有接口新增。这里需要注意的是，可能PSCI协议在前
+SMCCC在后，SMCCC使用smc还是hvc是在PSCI初始化的时候确定的。
+
+KVM里SMCCC的支持
+-----------------
+
+内核里SMCCC的接口在drivers/firmware/smccc、include/linux/arm-smccc.h里实现。具体
+由smccc_conduit这个变量决定使用smc还是hvc，这个变量在PSCI的初始化逻辑里根据psci_conduit
+配置，而psci_conduit的值是通过读ACPI FADT表里的boot_flags来决定的。直接看下qemu里
+生成ACPI FADT表的代码，可以看到如果guest有EL2则使用smc，如果guest只有EL0/EL1就用hvc。
+```
+machvirt_init
+    if (vms->secure && firmware_loaded) {              
+        vms->psci_conduit = QEMU_PSCI_CONDUIT_DISABLED;
+    } else if (vms->virt) {          <--- 虚机支持ARM Virtualization Extensions
+        vms->psci_conduit = QEMU_PSCI_CONDUIT_SMC;     
+    } else {                                           
+        vms->psci_conduit = QEMU_PSCI_CONDUIT_HVC;     
+    }                                                   
+```
+
+虚机在使用smc或hvc时，会trap到KVM，KVM负责模拟对应SMCCC接口。KVM里模拟SMCCC支持
+的逻辑如下:
+```
+handle_smc/handle_hvc
+  +-> kvm_smccc_call_handler
+        /*
+         * 在正式处理SMCCC之前，先确定下是否要处理。判断的依据有两个，一个是
+         * SMCCC filter, 一个是KVM firmware register。
+         * 
+         * KVM提供了SMCCC filter ioctl接口，用户态可以配置一个具体SMCCC function
+         * 的处理方式，可以配置的处理方式有：处理/不处理/到用户态处理。
+         *
+         * KVM定义了一组firmware register，基本上是一种SMCCC接口类型对应一个寄存器，
+         * 每个具体的接口占据寄存器上的1个bit，表示对应接口是否实现。用户态可以
+         * 使用KVM SET_ONE_REG ioctl接口改变这些寄存器的值，这些寄存器也在虚机寄存器
+         * 列表里，迁移的时候也要考虑。
+         *
+         * 这里独立检查如上两个逻辑。
+         */
+    +-> kvm_smccc_get_action
+    +-> switch (func_id) {                <--- 各种SMCCC接口的实现
+        case: ...
+        default: 
+            return kvm_psci_call(vcpu)    <--- KVM PSCI模拟的入口
+        }
+    +-> smccc_set_retval(vcpu, val[0], val[1], val[2], val[3])  <--- 配置返回值
+```
+
+PV特性和SMCCC
+--------------
+
+一般虚机系统并不知道自己在虚机内，这样的兼容性更好。但是，从上帝视角看，虚机和
+物理机还是有很大的不同，比如物理机同一时刻每个核都是在线的(不考虑CPU offline的
+情况)，虚机每个vCPU本质上是host上的一个线程，一个虚机同一时刻，可能有的vCPU在线，
+有的vCPU不在线。这样，叫guest里跑的系统知道他跑在虚机上，就会创造出一定的优化空间
+来。所谓半虚机化特性(PV特性)，就是guest里跑的系统需要配合这个特性做修改。
+
+ARM上的PV特性在Documentation/virt/kvm/arm里有对应的描述文件，目前只有pvtime和ptp。
+这些PV特性和虚机系统的通信就可以通过SMCCC。比如pvtime这个特性对应的function id就
+定义在Standard Hypervisor Service Call这个接口类别里，guest系统通过这个接口初始化
+pvtime。
