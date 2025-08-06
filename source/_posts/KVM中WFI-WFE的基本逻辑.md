@@ -25,12 +25,26 @@ guest的vLPI中断支持附带host doorbell中断的功能，当被注入vLPI的
 
 WFE的虚拟化处理逻辑和WFI的逻辑基本一致，不过WFE是直接换一个vCPU的线程来跑。
 
-当物理核上只有一个vCPU线程在跑的时候，wfi/wfe没有必要再做trap，KVM在上线CPU的时候
-把wfe/wfi都配置为不再trap，所以它们是实际执行的。从host上看就是vCPU线程一直有指令
-在运行，不管是正常跑还是做wfi。所以，host上看到vCPU线程的CPU占用率是100%。
+当物理核上只有一个vCPU线程在跑的时候，wfe没有必要再做trap，trap出去也没有另外的
+vCPU线程可以换进来跑；wfi在GIC支持vLPI/vSGI直通的时候，也不trap到KVM，这里似乎是
+更倾向保证vLPI/vSGI的性能，注意wfi在host是GICv3的时候，还是要trap的，反正GICv3时，
+所有虚机中断都要先trap的KVM里，再注入到虚机。这样如果把wfe/wfi都配置为不再trap，
+那么它们是实际执行的，从host上看就是vCPU线程一直有指令在运行，不管是正常跑还是做
+wfi/wfe，所以，host上看到vCPU线程的CPU占用率是100%。
 
-对于WFxT，KVM只是加了查询超时的一个动作，如果trap到KVM里处理的时候已经超时，就不
-处理直接返回了，如果没有超时就和如上wfe/wfi的处理逻辑一样。
+WFxT编码了一个通用寄存器，软件可以把一个counter数值放到这个寄存器里，当超时发生时，
+硬件触发唤醒事件，WFxT被唤醒。对于WFxT，虚拟化下如果发生了trap，KVM中只是加了查询
+超时的一个动作，如果trap到KVM里处理的时候已经超时，就不处理直接返回了，如果没有
+超时就和如上wfe/wfi的处理逻辑一样。注意，WFX trap的逻辑和timeout超时逻辑是正交的，
+WFX trap后，这个指令已经执行完毕，所以KVM要有模拟WFX超时的逻辑。(todo: 怎么模拟?)
+
+WFE相关的还有一个特性FEAT_TWED，这个特性使得WFE trap之前可以加一段delay时间。如果
+trap之前被唤醒，WFE执行完毕，不会再trap。
+
+KVM里还有一堆和WFX相关的软件微调逻辑。KVM在处理WFI trap时，不是马上调度其它host
+线程运行，而是等待一个软件配置的时间(vcpu->halt_poll_ns)，如果在这个时间内，vCPU
+有中断、timer等要处理，将继续执行当前vCPU线程。KVM里加了一堆这个微调对应的配置和
+统计参数。
 
 代码分析
 ---------
@@ -49,20 +63,35 @@ kvm_handle_wfx
 
     +-> kvm_vgic_put
     | +-> vgic_v3_put
-    |       /* todo: vcpu下线，vgic要做什么处理 */
+    |       /* vcpu下线时，vgic的相关处理在这里进行 */
     |   +-> vgic_v4_put
     |         /* 在WFI处理中需要enable doorbell中断 */
     |     +-> its_make_vpe_non_resident(vpe, !!vcpu_clear_flag(vcpu, IN_WFI))
 
     +-> kvm_vcpu_halt
     | +-> kvm_vcpu_block
-    |       /*
-    |        * 注意这里把vCPU线程移除了run queue，后续在doorbell中断里唤醒vCPU线程。
-    |        * 如果没有doorbell中断，vCPU线程将会一直不被唤醒。注意，doorbell中断
-    |        * 的处理见下面分析。
-    |        */
-    |   +-> set_current_state(TASK_INTERRUPTIBLE)
-    |   +-> schedule
+    |   for (;;) {
+    |         /*
+    |          * 注意这里把vCPU线程移除了run queue，后续在doorbell中断里唤醒vCPU线程。
+    |          * 如果没有doorbell中断，vCPU线程将会一直不被唤醒。注意，doorbell中断
+    |          * 的处理见下面分析。
+    |          */
+    |     +-> set_current_state(TASK_INTERRUPTIBLE)
+    |         /*
+    |          * 检测vCPU是否应该被block，检测的条件有:
+    |          * 1. vCPU是否runnable?
+    |          * 2. 是否wfit的timer到期
+    |          * 3. vCPU线程是否有信号要处理
+    |          * 4. vCPU是否有KVM_REQ_UNBLOCK标记
+    |          */
+    |     +-> kvm_vcpu_check_block
+    |     +-> schedule
+    |       ... todo: bg timer的逻辑
+    |       kvm_arch_vcpu_put
+    |         +-> kvm_timer_vcpu_put
+    |           +-> kvm_timer_blocking
+    |
+    |   }
 
     +-> vcpu_clear_flag(vcpu, IN_WFI)
     +-> vcpu_clear_flag(vcpu, IN_WFI)
@@ -85,7 +114,7 @@ vgic_v4_doorbell_handler
       ...
 ```
 
-上面提到的，只有一个vCPU线程在运行，wfe/wfi关trap的逻辑在：
+上面提到的，wfe/wfi开关trap的逻辑在vCPU上线的时候：
 ```
 kvm_arch_vcpu_load
   +-> kvm_vcpu_should_clear_twe
@@ -100,5 +129,5 @@ kvm_arch_vcpu_load
 host调度vCPU线程上下线的时候，会调用到kvm注册给调度器的回调函数kvm_sched_out/in。
 
 host上中断处理中，是否会调用kvm_sched_out/in? 对于非抢占内核，中断打断当前的内核
-执行流程，在中断执行完成后，应该继续返回被打断的点执行，而不执行内核抢占，所以会
-调用kvm_sched_out/in么？
+执行流程，在中断执行完成后，应该继续返回被打断的点执行，而不执行内核抢占，所以应
+该不会调用kvm_sched_out/in？
