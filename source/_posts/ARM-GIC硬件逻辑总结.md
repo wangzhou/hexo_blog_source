@@ -34,6 +34,8 @@ GIC的需求
 
 6. 对于支持虚拟化的CPU核，GIC要配合支持，并尽量降低开销。
 
+7. 需要和系统的各种安全状态联合定义，不因为中断破坏安全定义。
+
 INTID和中断种类
 ----------------
 
@@ -53,6 +55,20 @@ GICv4对于SPI也有大量的配置寄存器。
 
 MSI数量巨大，配置信息保存在内存中的表格里，下配置的方式也改用命令进行，也就有comand
 queue之类的设计。
+
+一个中断可以被定义成group0或者group1中断，以及secure中断，但是确定的中断类型只有：
+group0中断、secure group1、non-secure group1三种类型。GIC使用GICD_CTLR.DS定义其
+支持的安全状态，当GICD_CTLR.DS是0的时候表示GIC支持secure和non-secure，以及如上的
+三种中断类型。注意，CPU在安全和非安全状态，比如EL3以及非安全EL0/1，同一个GIC寄存
+器对CPU可能呈现出不同的域段。比如GICD_CTLR就分安全和非安全的访问，其中GICD_CTLR.DS
+只在安全访问下可见(这里只看同时支持安全和非安全的GIC)。一般需要在EL3(BIOS)把这个
+DS域段配置成0，这样GIC支持secure和non-secure，以及如上的三种中断类型配置。
+
+GIC上的中断最终通过IRQ或者FIQ报给CPU，是通过IRQ还是FIQ报给CPU，决定要素有如上的
+三个中断类型以及CPU当前的EL状态，GIC spec里有具体定义表格。这里没有看出这些定义
+的内在关系。
+
+GIC上有寄存器配置每个中断的中断类型，具体寄存器是GICD(R)_IGROUPR<n>和GICD(R)_IGRPMODR<n>。
 
 中断触发方式和中断状态
 -----------------------
@@ -189,11 +205,82 @@ ICH_MISR_EL2:
 
 GICR寄存器:
 
-todo: ...
+GICR_CTLR
+GICR_IIDR
+GICR_TYPER
+GICR_STATUSR
+GICR_WAKER
+GICR_MPAMIDR
+GICR_PARTIDR
+GICR_SETLPIR
+GICR_CLRLPIR
+GICR_PROPBASER
+GICR_PENDBASER
+GICR_INVLPIR
+GICR_SYNCR
+GICR_VPROPBASER
+GICR_VPENDBASER
+GICR_VSGI
+GICR_VSGIPENDR
+
+GICR_IGROUPR0/GICR_IGROUPR<n>E
+GICR_ISENABLER0
+GICR_ICENABLER0
+GICR_ISPENDR0
+GICR_ICPENDR0
+GICR_ISACTIVER0
+GICR_ICACTIVER0
+GICR_IPRIORITYR<n>
+
+GICR_ICFGR0/1/<n>E
+GICR_IGRPMODR0/<n>E
+GICR_NSACR
+GICR_INMIR0/<n>E
+
 
 GICD寄存器:
 
-todo: ...
+GICD_CTLR
+GICD_TYPER
+GICD_IIDR
+GICD_TYPER2
+GICD_STATUSR
+
+GICD_SETSPI_NSR
+GICD_CLRSPI_NSR
+GICD_SETSPI_SR
+GICD_CLRSPI_SR
+
+GICD_IGROUPR<n>
+GICD_ISENABLER<n>
+GICD_ICENABLER<n>
+GICD_ISPENDR<n>
+GICD_ICPENDR<n>
+GICD_ISACTIVER<n>
+GICD_ICACTIVER<n>
+GICD_IPRIORITYR<n>
+
+GICD_ITARGETSR<n>
+GICD_ICFGR<n>
+GICD_IGRPMODR<n>
+GICD_NSACR<n>
+GICD_INMIR<n>
+
+GICD_SGIR
+GICD_CPENDSGIR<n>
+GICD_SPENDSGIR<n>
+
+GICD_IROUTER<n>
+
+注意：还有各种E后缀寄存器
+
+GICM_TYPER
+GICM_SETSPI_NSR
+GICM_CLRSPI_NSR
+GICM_SETSPI_SR
+GICM_CLRSPI_SR
+GICM_IIDR
+
 
 ITS寄存器:
 
