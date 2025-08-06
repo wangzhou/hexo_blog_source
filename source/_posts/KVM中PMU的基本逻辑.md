@@ -1,5 +1,5 @@
 ---
-title: KVM中PMU的基本逻辑
+title: KVM中PMU的基本逻辑(草稿)
 abbrlink: 13528
 date: 2025-04-12 19:47:16
 tags: [虚拟化, KVM, PMU]
