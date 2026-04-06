@@ -1,0 +1,159 @@
+---
+title: 基于QEMU的Linux_reboot流程分析
+tags:
+  - QEMU
+  - Linux内核
+  - 虚拟化
+  - ARM64
+  - reboot
+description: '本文总结Linux KVM环境下guest reboot的整个流程。Linux使用v6.14-rc5, qemu使用9.1.90'
+abbrlink: 24161
+date: 2026-04-06 11:52:32
+categories:
+---
+
+guest linux reboot
+-------------------
+
+显然，linux的reboot流程在guest和host上是一致的，这里写成guest linux reboot只是为了
+突出下主题。
+```
+/* kernel/reboot.c */
+reboot
+  +-> kernel_restart
+        /* arch/arm64/kernel/process.c */
+    +-> machine_restart
+          /* 发IPI停止其它core */
+      +-> smp_send_stop
+          /* 
+           * 支持efi runtime service的话，调用对应接口efi.reset_system接口，这里
+           * 看不见了，姑且认为这个接口使用PSCI的PSCI_1_1_FN64_SYSTEM_RESET2实现。
+           */
+      +-> efi_reboot
+```
+
+host KVM处理
+-------------
+
+PSCI使用smc/hvc实现，虚拟机里调用PSCI会trap到KVM，KVM会模拟实现对应的请求，调用
+流程如下：
+```
+kvm_arch_vcpu_ioctl_run -> handle_exit -> handle_trap_exceptions ->
+handle_smc/handle_hvc -> kvm_smccc_call_handler -> kvm_psci_call:
+  +-> kvm_psci_1_x_call
+    +-> kvm_psci_system_reset2
+          /*
+           * 记录kvm退出的原因和类型，后续会传给qemu。可见这时从kvm退出的原因
+           * 是退出系统，退出的类型是reset。最后从ioctl_run返回到qemu。
+           */
+      +-> kvm_prepare_system_event
+        +-> vcpu->run->system_event.type = KVM_SYSTEM_EVENT_RESET
+            vcpu->run->exit_reason = KVM_EXIT_SYSTEM_EVENT
+```
+
+qemu处理
+---------
+
+qemu vCPU线程的主线逻辑如下，退出到qemu后先stop当前的vCPU线程，然后给qemu主线程
+发消息，在主线程里调用CPU以及各种外设之前注册的reset函数把整个虚机复位到初始状态，
+然后再触发各个vCPU线程继续运行。整个过程vCPU线程只是挂起一下。
+```
+kvm_vcpu_thread_fn
+  kvm_init_vcpu
+  do {
+     if (cpu_can_run(cpu)) {
+
+       kvm_cpu_exec(cpu);
+       
+       |  kvm_vcpu_ioctl                   <--- 运行vCPU
+       |  switch (run->exit_reason)        <--- 处理kvm退出
+       |  ...
+       |  case KVM_EXIT_SYSTEM_EVENT       <--- 处理退出系统/reset，注意除了reset
+       |    case KVM_SYSTEM_EVENT_RESET         还有shutdown/crash/suspend/wakeup等
+       |      qemu_system_reset_request  
+       |        cpu_stop_current           <--- stop当前vCPU
+       |        qemu_notify_event          <--- 触发qemu主线程
+
+       if (r == EXCP_DEBUG) {
+           cpu_handle_guest_debug(cpu);
+       }
+     }
+     qemu_wait_io_event(cpu);
+  } while (!cpu->unplug || cpu_can_run(cpu));
+ ...
+```
+
+qemu主线程逻辑如下，上面的qemu_notify_event解开main_loop_wait的等待后，qemu主线程
+进入main_loop_should_exit执行。
+```
+main
+  +-> qemu_init
+  +-> qemu_main_loop
+    +-> while (!main_loop_should_exit(&status)) {
+            main_loop_wait(false);
+        }
+
+main_loop_should_exit
+  ...
+  +-> qemu_reset_requested
+    +-> pause_all_vcpus
+    +-> qemu_system_reset
+
+      cpu_synchronize_all_states
+        +-> cpu_synchronize_state
+              /* kvm的core寄存器信息读到qemu里来 */
+          +-> kvm_cpu_synchronize_state
+
+      qemu_devices_reset / mc->reset
+        +-> resettable_reset
+
+          +-> arm_cpu_reset_hold
+            ...
+            +-> kvm_arm_reset_vcpu                         <--- core reset
+                  /* 下发KVM_ARM_VCPU_INIT ioctl，KVM会初始化vCPU */
+              +-> kvm_arm_vcpu_init
+              +-> write_kvmstate_to_list
+              +-> write_list_to_cpustate
+
+            +-> kvm_arm_gicv3_reset_hold                   <--- gicv3 reset
+                  /* reset qemu gicv3的状态 */
+              +-> kgc->parent_phases.hold(obj, type) // arm_gicv3_common_reset_hold
+                  /*
+                   * 调用KVM GICv3的接口，把qemu GICv3的状态配置到KVM里。热迁移
+                   * 在目的端恢复GICv3的状态的时候也会调用这个接口。
+                   */
+              +-> kvm_arm_gicv3_put
+
+            +-> kvm_arm_its_reset_hold                     <--- gicv3 ITS reset
+              +-> c->parent_phases.hold(obj, type) // gicv3_its_common_reset_hold
+              +-> 下发KVM_DEV_ARM_ITS_CTRL_RESET以及ITS寄存器刷新ioctl
+
+      cpu_synchronize_all_post_reset
+        +-> cpu_synchronize_post_reset
+              /* qemu的core寄存器信息写回KVM */
+          +-> kvm_cpu_synchronize_post_reset
+
+    +-> resume_all_vcpus
+```
+
+下面列出上面各个设备reset_hold回调注册的地方:
+```
+/* target/arm/cpu.c */
+arm_cpu_class_init
+ +-> resettable_class_set_parent_phases(rc, NULL, arm_cpu_reset_hold, NULL,
+                                        &acc->parent_phases);
+```
+
+```
+/* hw/intc/arm_gicv3_kvm.c */
+kvm_arm_gicv3_class_init
+  +-> resettable_class_set_parent_phases(rc, NULL, kvm_arm_gicv3_reset_hold, NULL,
+                                         &kgc->parent_phases);
+```
+
+```
+/* hw/intc/arm_gicv3_its_kvm.c */
+kvm_arm_its_class_init
+  +-> resettable_class_set_parent_phases(rc, NULL, kvm_arm_its_reset_hold, NULL,
+                                          &ic->parent_phases);
+```
