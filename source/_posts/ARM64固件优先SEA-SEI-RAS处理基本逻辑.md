@@ -1,8 +1,12 @@
 ---
 title: ARM64固件优先SEA/SEI RAS处理基本逻辑
+tags:
+  - ARM64
+  - RAS
+  - Linux内核
+description: 分析ARM64架构上固件优先模式的SEA/SEI RAS错误处理流程，包括异常触发、固件处理、OS处理及关键数据结构。
+abbrlink: 26076
 date: 2026-05-09 00:26:54
-tags: [ARM64, RAS, Linux内核]
-description: "分析ARM64架构上固件优先模式的SEA/SEI RAS错误处理流程，包括异常触发、固件处理、OS处理及关键数据结构。"
 categories:
 ---
 
