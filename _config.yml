@@ -103,7 +103,7 @@ theme: next
 ## Docs: https://hexo.io/docs/one-command-deployment
 deploy:
   type: git
-  repo: https://github.com/wangzhou/wangzhou.github.io.git
+  repo: git@github.com:wangzhou/wangzhou.github.io.git
   branch: main
 
 reward_comment: test
