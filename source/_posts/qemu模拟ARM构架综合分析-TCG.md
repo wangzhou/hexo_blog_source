@@ -1,5 +1,5 @@
 ---
-title: qemu模拟ARM构架综合分析
+title: qemu模拟ARM构架综合分析-TCG
 tags:
   - QEMU
   - ARM64
