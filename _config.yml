@@ -104,7 +104,7 @@ theme: next
 deploy:
   type: git
   repo: git@github.com:wangzhou/wangzhou.github.io.git
-  branch: main
+  branch: master
 
 reward_comment: test
 wechatpay: /images/zone-types.jpg

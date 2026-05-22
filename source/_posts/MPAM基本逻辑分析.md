@@ -31,20 +31,20 @@ categories:
 MPAM使用一个全局唯一的三元组标记每个内存访问的源头，对于PE，这些信息需要配置到
 MPAMx_ELn相关系统寄存器里，可以看到如果partition ID的语意就是PE本身，配置一次就
 好，如果partition ID表示线程，就需要在线程切换的时候更新这个配置。在cache/内存控制器/
-SMMU上增加MPAM控制节点(MSC(memory system compoment))，节点提供MMIO寄存器接口，这
+SMMU上增加MPAM控制节点(MSC(memory system component))，节点提供MMIO寄存器接口，这
 些接口接受三元组的资源控制和监控的配置。相关配置提前配置好，系统运行的时候，访问
 cache或者内存的请求根据提前配置的信息进行资源控制和监控。
 
 三元组的三个元素是：partition ID space，partition ID，PMG(performance monitor group)。
 partition ID space是安全态，主要用partition ID区分资源类型，PMG用来聚集一组监测
-资源。MSC集成在各个内存相关的部件里，由专门的ACPI或者DTS MPAM表格报给OS。(todo)
+资源。MSC集成在各个内存相关的部件里，由专门的ACPI或者DTS MPAM表格报给OS。
 
 MPAM协议里还定义了一些MPAM内部传递控制信息的概念(第四章)，感觉这些概念以及相关的
 部件是软件较少感知的。
 
 MPAM协议里简单描述了下硬件内部partitioning control的逻辑，简单讲就是当前使用的资
-源和提前配置好的资源不断的做比较，如果还有余量就给分资源，反之就不给分资源。更近
-一步看，capacity-based partitioning才需要这种动态调整，portion-based partitioning
+源和提前配置好的资源不断地做比较，如果还有余量就给分资源，反之就不给分资源。更进一步
+看，capacity-based partitioning才需要这种动态调整，portion-based partitioning
 (比如，直接配置可以用哪几个cache way的情况)的调整逻辑就可以比较简单。可以看到硬件
 内部会用表格记录各种资源配置，如果这个表格在硬件内部，那么这个部件在使用中有低功
 耗的上下电动作时，这些内容都要做保存和恢复。
@@ -85,7 +85,7 @@ resource partitioning control
 同时支持多种不同类型的控制和监控，比如，同时支持memory和cache，RIS(resource instance
 selection)就是对支持类型的标记。
 
-软件需要用MPAMCFG_PART_SEL选择当前要配置的partition ID和RIS，然后配置对应的寄存，
+软件需要用MPAMCFG_PART_SEL选择当前要配置的partition ID和RIS，然后配置对应的寄存器，
 配置选中partition ID和RIS对应的资源限制。
 
 ```
@@ -100,11 +100,11 @@ MPAMCFG_CPBM<n>     Cache Portion Bitmap Partition 按照portion的配置寄存�
 
 MPAMCFG_MBW_MAX     Memory Bandwidth Maximum Partition
 MPAMCFG_MBW_MIN     Memory Bandwidth Minimum Partition
-MPAMCFG_MBW_PBM<n>  Bandwidth Portion Bitmap Partition
+MPAMCFG_MBW_PBM<n>  Bandwidth Portion Bitmap Partition 
 MPAMCFG_MBW_PROP    Memory Bandwidth Proportional Stride Partition
-MPAMCFG_MBW_WINWD   Memory Bandwidth Partitioning Window Width
+MPAMCFG_MBW_WINWD   Memory Bandwidth Partitioning Window Width 
 
-MPAMCFG_PRI         Priority Partition  todo: 怎么搞的优先级？
+MPAMCFG_PRI         Priority Partition
 ```
 
 resource monitor
@@ -153,8 +153,8 @@ MSMON_OFLOW_MSI_DATA      MSI数据
 MSMON_OFLOW_MSI_MPAM      MSI MPAM标识
 MSMON_OFLOW_MSI_SR        MSI状态寄存器
 ```
-todo: PMG怎么配置？1. 硬件上是怎么过滤的partid和PMG都一样才能过滤。2. resctrl
-怎么配置过滤多个对象。
+注意，如上描述的是MSC处怎么配置具体的监控。请求发出的源端也要配置partid以及PMG，
+这个依然是配置到MPAMx_ELn寄存器中的。监控需要匹配PARTID+PMG的组合。
 
 SMMU MPAM
 ----------
@@ -168,9 +168,30 @@ Partid Narrow
 --------------
 
 所谓Partid Narrow是进入MSC的partid可以通过提前配置好的映射被映射成另外一个partid，
-后面的控制和检测都基于新的partid。
+后面的控制和监控都基于新的partid。
 
-todo: 创建/配置/查询，主要使用场景。
+Partid Narrow的配置分三点：1. 映射的配置，2. 映射配置的读取，3. 如何使用映射的partid。
+
+映射配置：用reqPARTID写MPAMCFG_PART_SEL(不带INTERNAL位)，先选择要配置的reqPARTID，
+用目标intPARTID写MPAMCFG_INTPARTID，同时置上MPAMCFG_INTPARTID.INTERNAL为1。映射
+配置的读取：和映射配置一样，先选reqPARTID，然后读MPAMCFG_INTPARTID就好。
+
+Partid的使用分映射和配置两个方面。只要配置了映射，硬件会对对应的partid做映射。但是，
+针对partid的控制和监控的配置比较奇怪，需要配置MPAMCFG_PART_SEL.INTERNAL为1，同时
+把intPARTID配置到MPAMCFG_PART_SEL.PARTID上。注意，这里INTERNAL为1是告诉硬件，现在
+选的PARTID是intPARTID，后面的配置是针对这个intPARTID。
+
+主要用途是扩展监控容量——多个reqPARTID可以映射到同一个intPARTID，复用同一组资源配置，
+但可以通过不同reqPARTID区分监控上下文。
+
+举个例子，系统有L3 MSC（无narrow, 256 PARTID）和MATA MSC（有narrow, 32 intPARTID,
+256 reqPARTID），PMG有8个值。两个MSC的PARTID交集是32，所以控制组数固定为32。
+
+无narrow：监控靠(PARTID, PMG)，最多 32×8 = 256 个监控端点。
+有narrow：监控靠(reqPARTID, PMG)，最多 256×8 = 2048 个监控端点。
+
+控制组数都是32，但narrow把监控能力放大了8倍。本质是reqPARTID变成了PMG之上的第二
+层监控维度。
 
 MPAM虚拟化
 -----------
@@ -187,35 +208,45 @@ Intel最早实现了MPAM类似的功能(RDT)，软件上用一个独立的文件
 ├── cpus                     # 整个resctrl系统的CPU列表
 ├── cpus_list                # 人类可读的CPU列表格式
 ├── mon_groups/              # 监控组目录
-├── info/                    # 系统资源信息
-│   ├── L3/
+├── info/                    # 系统资源信息，静态信息，只出现在顶层目录
+│   ├── L3/                  # cache控制资源信息
 │   │   ├── cbm_mask
 │   │   ├── min_cbm_bits
-│   │   ├── num_closids
+│   │   ├── num_closids      # 最大控制组数(class of service ID)，Intel定义的古怪名字
 │   │   └── shareable_bits
-│   ├── MB/
+│   ├── L3_MON/              # cache监控资源信息
+│   │   ├── num_rmids        # 最大PMG数
+│   │   └── mon_features     # 支持的监控事件
+│   ├── MB/                  # 内存带宽控制资源信息
 │   │   ├── bandwidth_gran
 │   │   ├── delay_linear
-│   │   └── min_bandwidth
+│   │   ├── min_bandwidth
+│   │   └── num_closids      # MB支持的最大控制组数
+│   ├── MB_MON/              # 内存带宽监控资源信息
+│   │   ├── num_rmids
+│   │   └── mon_features
 │   └── last_cmd_status      # 最后一次命令执行状态
-├── mon_data/                # 根控制组的监控数据
-│   ├── mon_L3_00/
-│   │   ├── llc_occupancy
+├── mon_data/                # 根控制组的监控数据。每种类型的monitor分开呈现
+│   ├── mon_L3_00/           # L3 cache monitor域0。如果有多个L3 MSC，就有mon_L3_00/01/...
+│   │   └── llc_occupancy
+│   ├── mon_MB_00/           # 内存带宽monitor域0。如果有多个MB MSC，就有mon_MB_00/01/...
 │   │   ├── mbm_total_bytes
 │   │   └── mbm_local_bytes
 │   └── ...
-├── schemata                 # 资源分配方案
+├── schemata                 # 资源分配方案，每行一个class，每个id=value一项为一个component/domain
+│     例如: L3:0=ffff;1=ffff
+│           MB:0=100;1=100
 ├── size                     # 根控制组的缓存大小
 ├── tasks                    # 根控制组的进程列表
-├── <用户创建的目录>/        # 用户自定义控制组
+├── <用户创建的目录>/        # 用户自定义控制组，在用户目录下创建一样的文件
 │   ├── cpus
-│   ├── cpus_list
+│   ├── cpus_list            # A
 │   ├── schemata
 │   ├── size
-│   ├── mon_groups/          # 该控制组的监控组
-│   ├── mon_data/            # 该控制组的监控数据
+│   ├── mon_groups/          # B。该控制组的监控组。可以在这个目录下创建子监控组。
+│   ├── mon_data/            # 该控制组的顶层监控数据。注意，这里会再次展示系统中所有的监控MSC
 │   └── tasks
-└── <mon_groups创建的目录>/  # 监控组目录
+└── <mon_groups创建的目录>/  # 监控组目录。注意这里是全局监控组目录。
     ├── mon_data/            # 监控组的具体监控数据
     └── ...
 (AI生成)
@@ -226,16 +257,23 @@ resctrl使用层次化的结构控制资源，resctrl的根目录是全局资源
 对应起来，partition ID和CPU/线程的绑定关系通过配置cpus/cpus_list/tasks来实现。
 
 控制组创建后，会在控制组目录自动生成监控组控制目录(mon_groups)和监控组数据目录
-(mon_data)。需要手动在mon_group里创建自定义监控组，监控组监控的事件要如何配置? todo
+(mon_data)。可以在mon_groups里创建自定义子监控组。拿如上的用户自定义控制组作为一个
+例子，比如在A处的cpus_list配置控制和监控CPU 1-4，完全可以在B处mon_groups中创建多个
+子监控组目录，配置子监控组目录下的cpus_list，独立监控CPU1。
+
+一般来说系统里有多个MSC，对于一个被控制对象，比如一个线程，可以在这些MSC上配置这个
+被控制对象的资源控制和资源监控，这个完全是用户自己的配置行为。resctrl通过schemata
+文件在每个控制层级暴露所有MSC的控制信息。
+
+resctrl中标准监控事件有：llc_occupancy(末级缓存占用)、mbm_total_bytes(总内存带宽)等。
 
 Linux内核实现
 --------------
 
-MPAM对外使用resctrl文件系统作为接口。以openEuler v6.6内核为例，驱动代码在
-drivers/platform/mpam/。这个驱动是一个平台设备驱动，但是但是真正probe的地方在注
-册的cpu online的会调函数里。
+MPAM对外使用resctrl文件系统作为接口。以openEuler v6.6内核为例，驱动代码在drivers/platform/mpam/。
+这个驱动是一个平台设备驱动，但是，真正probe的地方在注册的cpu online的回调函数里。
 
-核心数据结构:
+核心数据结构：
 ```
 /* MPAM设备的分类，比如，cache/memory/IOMMU等 */
 struct mpam_class
@@ -248,24 +286,38 @@ struct mpam_msc
 /* 表示一个MSC上的一个resource type */
 struct mpam_msc_ris
 
-/* ? */
+/*
+ * 表示一个控制域(domain)，概念是resctrl里的一个最小控制单元，比如，如上resctrl
+ * 文件系统中schemata文件下的"L3:0=ffff"。和MSC的区别是，MSC表示具体的物理控制单元，
+ * mpam_component是对控制的抽象，可能多个物理控制单元软件上对外呈现一个最小控制
+ * 单元。一般mpam_component和MSC是一一对应的。
+ */
 struct mpam_component
   +-> ris list
 
-/* 和resctrl fs的交互的数据结构，怎么建立联系的？*/
+/*
+ * 和resctrl fs的交互的数据结构，每个mpam_resctrl_res内嵌resctrl_resource，
+ * 全局数组mpam_resctrl_exports[RDT_NUM_RESOURCES]索引L3/L2/MC。初始化时
+ * mpam_domains_init()遍历每个class的component，调用mpam_resctrl_alloc_domain()
+ * 分配mpam_resctrl_dom(内嵌resctrl_domain)，通过resctrl_online_domain()向
+ * resctrl核心注册。用户写schemata时，驱动遍历对应component的所有RIS，调用
+ * mpam_reprogram_ris_partid()写MSC硬件寄存器。
+ */
 struct mpam_resctrl_res
 ```
 
-MSC设备解析:
+MSC设备解析：
 ```
 mpam_msc_drv_probe                  <-- probe以及创建MSC
   +-> acpi_mpam_parse_resources     <-- 创建mpam_ris
-    +-> mpam_ris_create
+    +-> mpam_ris_create 
       +-> mpam_class_get            <-- 如果还没有，就创建一个
           /*
-           * class和component_id为入参，对于cache是ACPI表中的cache_reference，
-           * 对于memory是proximity_domain。所以compoment的语意是什么？
-           *
+           * component表示应统一配置的一组MSC。对于cache，component_id来自ACPI PPTT
+           * 表的cache_reference，唯一标识一个特定缓存(如某个L3)；对于memory，
+           * component_id来自proximity_domain转换的NUMA node ID，同一NUMA node上的
+           * 多个内存控制器属于同一个component。每个component映射到一个resctrl域
+           * (schemata中的一行)，是该域的最小配置单元。
            */
       +-> mpam_component_get
 
@@ -277,7 +329,7 @@ mpam_discovery_cpu_online
     +-> resctrl_init                <-- 创建resctrl相关文件
 ```
 
-resctrl文件创建:
+resctrl文件创建: 
 ```
 /* fs/resctrl/rdtgroup.c */
 resctrl_init
@@ -311,9 +363,9 @@ rdtgroup_mkdir
     +-> mkdir_rdt_prepare
   +-> rdtgroup_mkdir_mon
 ```
-resctrl和驱动的接口似乎是直接arch实现函数调用的... 如此粗暴...
+resctrl和驱动的接口是直接arch实现函数调用的... 如此粗暴...
 
 MPAM资源配置的一般逻辑是，用户已经知道整个系统的cache和memory相关控制节点的拓扑，
-相关控制节点直接呈现在resctrl文件系统中。用户实际上通过resctrl把特性CPU或线程和
+相关控制节点直接呈现在resctrl文件系统中。用户实际上通过resctrl把特定CPU或线程和
 partid绑定，用户通过在各个控制节点上配置partid对应的控制和监控信息达到控制和监控
 的功能。partid最终呈现对应的可能是一个个独立的目录。
