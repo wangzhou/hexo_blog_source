@@ -41,7 +41,7 @@ slot内部结构如下：
 |  __int128 (128bit)         |
 |  +-----------+----------+  |
 |  |  sn       |  elem    |  |
-|  |  8 Byte   |  8 字节  |  |
+|  |  8 Byte   |  8 Byte  |  |
 |  +-----------+----------+  |
 +----------------------------+
 ```
@@ -65,8 +65,8 @@ void p64_blkring_enqueue(p64_blkring_t *rb, void *const elems[], uint32_t nelem)
          * 这里使用swizzle函数重新计算了实际的写入位置。具体计算方法是根据cache
          * line大小和一个slot大小(16B)，比如，对于cache line为64的情况，一个cache
          * line放4个slot，所以，swizzle计算实际存放位置是：
-         *   sn         0   1   2   3   4  ...
-         *   实际位置   0   4   8   12  1  ...
+         *   sn              0   1   2   3   4  ...
+         *   real position   0   4   8   12  1  ...
          * 这样做还是在尽量错开cache line。
          */
         uint32_t idx = swizzle(sn) & mask;
