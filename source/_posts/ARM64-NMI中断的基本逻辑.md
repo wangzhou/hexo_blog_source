@@ -14,8 +14,9 @@ categories:
 
 ARM新增加了NMI中断，GIC和CPU的逻辑做了相应的调整。ARM网站的[这篇](https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/a-profile-non-maskable-interrupts)文档对此做了介绍。
 
-对于GIC，增加一种优先级更高的中断，对应的中断发给CPU时，应该要携带相关信号，这个
-信号告诉CPU，当前是一个NMI。
+对于core，增加了NMI对应的ID域段和enable配置域段。对于GIC，增加一种优先级更高的中断，
+对应的中断发给CPU时，应该要携带相关信号，这个信号告诉CPU，当前是一个NMI。GIC使用
+GICD_TYPE.NMI提示是否支持NMI。
 
 NMI并不是完全不能被mask的，所以在CPU一层，ARM定义了两种针对NMI做mask的方法。
 
@@ -27,24 +28,142 @@ mask。这个bit和PSTATE.I的逻辑是基本一致的，只不过把控制范�
 RV应该是只有一个SP？)。ARM的ELx_SP特性的逻辑是，当PSTATE.SP为0时，各个EL都是用
 SP_EL0，当PSTATE.SP为1时，各个EL使用SP_ELx。
 
-基于如上的逻辑，如果当前是使用各个EL自己的SP_ELx(dedicated SP_ELx)，NMI就是mask
-的，当切到SP_EL0做栈指针时，NMI没有被mask。
+基于如上的逻辑，在配置SCTRL_EL1.SPINTMASK=1，且当前是使用各个EL自己的SP_ELx(dedicated SP_ELx, PSTATE.SP=1)，
+异常或者中断taken，就全局mask了所有中断。当切到SP_EL0做栈指针时，中断并没有被unmask。
 
 对于如上两种NMI mask的逻辑，中断或异常进入和退出时，各种中断被mask的逻辑依然存在。
 中断或异常进入和退出时，为了防止新的中断进来破坏之前要保存的上下文，硬件是自动关
 中断的。
 
+目前，openEuler 6.6回合的ARM NMI支持的补丁中，在使能NMI的时候，配置SCTRL_EL1.SPINTMASK=0，
+也就是说这个版本的软件使用第一种方式使用NMI。**注意**：这里的逻辑是，只要core enable
+NMI，不管是普通中断还是NMI中断，只要中断被taken，PSTATE.I(F)/ALLINT就会硬件置1。
+NMI的情况下，中断正常处理，普通中断的情况下，中断处理程序应该保存上下文后打开ALLINT，
+叫NMI可以进来。
+
+GIC spec上规定支持NMI的中断类型有PPI/SGI/SPI，LPI是不支持NMI的。在支持NMI的GIC
+版本上，这里的关系有点绕，GICv3.3/GICv4.2都支持NMI。首先，GICv3.x相当于GICv3的一
+个stable分支，GICv4.x支持虚拟中断直通特性，ARM定义GICv3.3支持NMI，是说在GICv3.2
+的基础上支持NMI，其中vNMI支持是说注入的PPI/SGI/SPI支持NMI，GICv4.2支持NMI，是说
+直通的vSGI支持NMI。有意思吧，这种留个stable版本的定义方式感觉主要是为了只支持GICv3
+的系统。
+
+再进一步展开看就是：
+
+GIC关于NMI的配置，只有GICD_TYPE.nmi，所谓GICv3.3/GICv4.2只是一个称谓。GIC协议允许
+GICv3.2/GICv4.0/GICv4.1叠加GICD_TYPE.nmi这个配置。
+
+GICv3.2叠加这个配置后，host支持NMI，guest通过LR注入的vPPI/vSGI/vSPI支持NMI。
+GICv4.0叠加这个配置后，host支持NMI，guest通过LR注入的vPPI/vSGI/vSPI支持NMI。
+GICv4.1叠加这个配置后，host支持NMI，guest通过LR注入的vPPI/vSGI/vSPI支持NMI，guest直通的vSGI支持NMI。
+
+GIC的协议里明确提了GICv3.3和GICv4.2的这个称谓。理论上，GICv4.0兼容GICv3，所以它
+也应该有GICv3.3的NMI，实际上一般厂家都基于GICv4.1去支持NMI，毕竟GICv4.0做的实在
+有些拉胯，是个过渡版本。
+
 NMI相关系统寄存器
 ------------------
+
+core相关的寄存器：
 
 ID_AA64PFR1_EL1.NMI   表示系统是否支持NMI。
 SCTLR_ELx.NMI         表示系统是否enable NMI。
 SCTLR_ELx.SPINTMASK   表示是否使用如上的第二种mask NMI的方式。
+ICC_NMIAR1_EL1        NMI对应的IAR寄存器。
+ISR_ELx               新增bit表示是否为NMI中断taken，中断处理入口靠这个识别NMI和普通中断，并分别处理。
+
+GIC相关的NMI寄存器有:
+GICD_INMIR            配置对应的SPI中断是否是NMI中断。
+GICR_INMIR            配置对应的PPI/SGI中断是否是NMI中断。
 
 NMI虚拟化相关的逻辑
 --------------------
 
-(todo)
+基本上就是LR注入或者vSGI的时候带上NMI这个标记，对应的硬件支持方式是LR寄存器上增加
+NMI标记位，vSGI的情况是先用ITS vSGI命令把NMI这个标记配置给硬件，保存在vLPI pending
+table的vSGI的NMI域段，后续vSGI直通的时候就可以带上这个信息。
+
+软件支持
+----------
+
+目前，ARM上host和虚机里的NMI支持都还没有进入主线，host NMI的补丁可以参考[这里](https://lwn.net/Articles/914838/)。
+Guest NMI的补丁可以参考[这里](https://gitee.com/openeuler/kernel/issues/I97WGU?skip_mobile=true)。
+
+Linux内核驱动使用request_percpu_nmi或者request_nmi申请NMI中断。
+
+中断入口：
+```
+entry.S: kernel_ventry 1, h, 64, irq
+  → b el1h_64_irq_handler
+
+entry-common.c: el1h_64_irq_handler(regs)
+  → el1_interrupt(regs, ISR_EL1_IS, handle_arch_irq, handle_arch_nmi_irq)
+```
+
+中断入口处区分处理普通中断和NMI：
+```c
+// entry-common.c
+static void noinstr el1_interrupt(struct pt_regs *regs, u64 nmi_flag,
+                                  void (*handler)(struct pt_regs *),
+                                  void (*nmi_handler)(struct pt_regs *))
+{
+    // ISR_EL1.IS(bit10)=1 → NMI; =0 → 普通IRQ
+    if (system_uses_nmi() && (read_sysreg(isr_el1) & nmi_flag)) {
+        __el1_nmi(regs, nmi_handler);   // NMI: gic_handle_nmi_irq (读 ICC_NMIAR1_EL1)
+        return;
+    }
+
+    write_sysreg(DAIF_PROCCTX_NOIRQ, daif);  // I=1, F=1
+
+    if (IS_ENABLED(CONFIG_ARM64_PSEUDO_NMI) && !interrupts_enabled(regs))
+        __el1_pnmi(regs, handler);       // 伪NMI
+    else
+        __el1_irq(regs, handler);        // 普通IRQ → gic_handle_irq
+}
+```
+
+普通中断处理路径：
+```
+gic_handle_irq → __gic_handle_irq_from_irqson
+
+// irq-gic-v3.c
+static void __gic_handle_irq_from_irqson(struct pt_regs *regs)
+{
+    if (!interrupts_enabled(regs))
+        return;
+
+    irqnr = gic_read_iar();             // 读ICC_IAR1_EL1, Ack 中断
+    is_nmi = gic_rpr_is_nmi_prio();     // 硬件NMI模式下恒false
+
+    if (is_nmi) {                       // 注意，这里表示是否是伪NMI
+        nmi_enter();
+        __gic_handle_nmi(irqnr, regs);
+        nmi_exit();
+    }
+
+    if (gic_prio_masking_enabled()) {   // 伪NMI路径:
+        gic_pmr_mask_irqs();            //   PMR只放行NMI
+        gic_arch_enable_irqs();         //   开I/F(msr daifclr, #3)
+    } else if (has_v3_3_nmi()) {        // 注意，只有普通中断会走进当前的函数，
+        _allint_clear();                // 只清ALLINT, I保持为1，NMI可进入, 普通IRQ仍被屏蔽
+    }
+
+    if (!is_nmi)
+        __gic_handle_irq(irqnr, regs);  // 分发到具体 handler
+}
+```
+注意，如果是GICv4.2，这里的逻辑是很顺的，但是，GICv4.1/GICv4.0的时候也会走到这里，
+只要core这时支持NMI，PSTATE.ALLINT就会置1，但是has_v3_3_nmi()是检测GICD_TYPE.NMI，
+这个时候GICD_TYPE.NMI为0，这里会进不去。后果就是mask住所有中断。普通中断和NMI中断
+的处理中，都会在硬中断返回时恢复PSTATE，这个时候就会恢复之前的中断状态；在中断下
+半步开中断，但是这里只是开PSTATE.I/F，ALLINT还是关的。所以，综合看起来就是，中断
+下半部所有硬中断都进不来。
+
+这个问题的根本修复方法是，enable NMI的时候应该查看core的NMI ID和GICD_TYPE.NMI，
+当两种同时满足的时候，才可以enable NMI。
+
+目前，ARM里使用NMI的只有PMU中断和基于PMU的hard lockup，关于hard lockup的基本逻辑
+可以参考[这里](https://wangzhou.github.io/Linux内核NMI-watchdog基本逻辑/)。
 
 NMI使用注意事项
 ----------------
@@ -54,3 +173,12 @@ NMI，在中断或异常进入和退出时，任何中断包括NMI中断都是�
 
 CPU mask掉普通中断的时候(配置PSTATE.I)，CPU是可以响应NMI的，这就需要系统程序员小
 心编程，避免因使用NMI而带来问题。
+
+Pseudo NMI
+-----------
+
+ARM还支持伪NMI中断，所谓伪NMI中断，就是利用GICv3的中断优先级屏蔽机(ICC_PMR_EL1)。
+将所有NMI配置为最高优先级(GICD_INT_NMI_PRI)，普通中断为较低优先级。通过切换PMR值
+实现开关普通中断。
+
+通过内核cmdline中，添加irqchip.gicv3_pseudo_nmi=1打开。
