@@ -1,0 +1,538 @@
+---
+title: qemu模拟ARM架构综合分析-KVM
+tags:
+  - QEMU
+  - KVM
+  - ARM
+  - GIC
+  - SMMU
+  - 虚拟化
+description: >-
+  本文分析qemu模拟ARM平台的方式，我们并不会深入分析相关的技术细节，只是大概看下整体架构，点出各个模拟的关键点，保证我们在随后的深入分析中可以迅速找见相关代码。使用的qemu版本是9.1.90。
+abbrlink: 22223
+date: 2026-06-20 16:25:02
+
+## 基本逻辑
+
+QEMU作为VMM启动基于KVM的虚机，QEMU的作用仅仅在于配置虚机，虚机的数据面基本上都由
+硬件承载了。QEMU通过下发各种KVM ioctl配置虚机的vCPU、GIC、Timer、内存、SMMU以及
+IO。当然QEMU是可以支持KVM和软件模拟混合的，比如可以vCPU、memory使用硬件加速，IO
+使用软件模拟。
+
+当前QEMU-KVM的ARM系统上，基本上所有部件用硬件加速，每个部件都会使用少量软件模拟
+补齐完整功能。
+
+## 基础数据结构
+
+accel类的继承关系：
+```
+TYPE_OBJECT <- TYPE_ACCEL <- TYPE_KVM_ACCEL
+```
+
+machine类的继承关系：
+```
+TYPE_OBJECT <- TYPE_MACHINE <- TYPE_VIRT_MACHINE
+```
+
+ARM核的数据结构大概是如下：
+```
+typedef struct CPUArchState {       <--- 这个是env
+        ...
+        xregs[32]                   <--- v8的32个64bit寄存器
+        pc;
+        pstate;
+        ... 各种系统寄存器 ...      <--- 和下面的list寄存器的区别？
+} CPUArchState;
+
+struct ArchCPU {                    <--- ARMCPU，一般是cpu指针
+        CPUState parent_obj;
+        CPUArchState env;
+        GHashTable *cp_regs;        <--- list寄存器，是一个hash表
+        uint64_t *cpreg_indexes;
+        uint64_t *cpreg_values;
+        ...
+        struct ARMISARegisters {
+        } isar;                     <--- cpu->isar
+        midr;
+        revidr;
+        ctr;
+        clidr;
+        ...
+}
+```
+
+qemu里CPU的数据结构是用面向对象的方式组织起来，类的关系是： 
+```
+TYPE_DEVICE <- TYPE_CPU <- TYPE_ARM_CPU <- TYPE_AARCH64_CPU <- 各种aarch64的具体CPU类型
+```
+最后面的各种类定义在target/arm/cpu64.c里的ARMCPUInfo aarch64_cpus[], 比如有：cortex-a57，
+host等。
+
+CPU实例的初始化函数会调用如上ARMCPUInfo结构里的initfn函数，拿host看下：
+```
+aarch64_host_initfn
+      /* 通过ioctl拿到KVM里系统寄存器的缓存值，保存到cpu->isar里。*/
+  +-> kvm_arm_set_cpu_features_from_host
+    +-> kvm_arm_get_host_cpu_features
+          /* ioctl KVM_GET_ONE_REG */
+      +-> read_sys_reg64
+```
+可以看到这里host语义就是虚拟机和host的CPU feature一致，通过KVM_GET_ONE_REG ioctl
+得到的值是kvm->kvm_arch->id_reg里的值，这些值在vCPU初始化的时候，被更新为host上对应
+寄存器的值。
+
+可以看到aarch64_a57_initfn里直接定义了a57需要支持的CPU特性。
+
+虚机的数据结构为：
+```
+struct VirtMachineState {
+    MachineState parent;
+    Notifier machine_done;
+    ...
+}
+```
+
+## 初始化和启动流程
+
+如下是qemu启动中，虚机和vCPU创建的基本逻辑：
+```
+main 
+  +-> qemu_init
+    ...
+    +-> qemu_create_machine
+    |
+    +-> configure_accelerators
+    | +-> do_configure_accelerator
+    |   +-> accel_init_machine
+    |         /*
+    |          * accel类的关系是：TYPE_ACCEL <- TYPE_KVM_ACCEL, 这里调用kvm accel
+    |          * class里的kvm_init。(accel/kvm/kvm-all.c)
+    |          *
+    |          * kvm_init里打开/dev/kvm，并通过KVM_CREATE_VM ioctl获得vmfd，
+    |          * 调用kvm_arch_init，初始化脏页跟踪的数据结构。
+    |          *
+    |          * /dev/kvm的fd和vm的fd保存在KVMState中，分别是fd和vmfd。
+    |          */
+    |     +-> acc->init_machine
+    |       ...
+    |       +-> kvm_arch_init      <--- VM相关的cap探测和使能在这里
+    |       +-> kvm_irqchip_create
+    |       +-> kvm_memory_listener_register
+    |
+    +-> qmp_x_exit_preconfig
+    | +-> qemu_init_board
+    |   ...
+    |   +-> create_default_memdev    <--- 在这里实际分配host内存(A)
+    |     +-> memory_region_init_ram
+    |   ...
+    |   +-> machine_run_board_init
+    |     +-> machine_class->init(machine)  <--- 函数指针，在hw/arm/virt.c virt_machine_class_init里
+    |       +-> machvirt_init               <--- 初始化虚机上的各个设备，包括如下调用arm_cpu_realizefn，拉起vCPU线程，虚机内存注册等。
+    |                                            注意，vCPU这里没有实际投入运行，实际运行在下面，具体又分为热迁移迁入端(A)和普通虚机启动(B)。
+    |                                                                             
+    | +-> qemu_machine_creation_done                                              
+    |   +-> qdev_machine_creation_done                                            
+    |     +-> cpu_synchronize_all_post_init                                       
+    |           /*                                                                
+    |            * 调用accel/kvm/kvm-accel-ops.c里的kvm_cpu_synchronize_post_init 
+    |            * 的回调把kvm_arch_put_registers放到vcpu的work_list里。          
+    |            */                                                               
+    |       +-> cpu_synchronize_post_init                                         
+    |                                                                             
+    | +-> if (incoming)    <--- 如果是热迁移的迁入端，做相应的准备工作(A)            
+    |       +-> qmp_migrate_incoming                                              
+    |         +-> todo: ...                                                       
+    |           +-> vm_start                                                      
+    |                                                                             
+    |     else             <--- 如上流程中拉起的vCPU线程中vCPU并没有投入运行，这里
+    |       +-> qmp_cont        才实际上促使vCPU运行起来。(B)
+    |         +-> vm_start
+    |           +-> resume_all_vcpus
+    |             +-> cpu_resume
+    |               +-> qemu_cpu_kick
+    |
+    +-> accel_setup_post
+      ...
+  +-> qemu_main
+    +-> main_loop_wait
+```
+
+machvirt_init展开如下：
+```
+/* hw/arm/virt.c */
+machvirt_init
+  /* 创建虚机上的各个设备 */
+  ....
+  +-> object_new(possible_cpus->cpus[n].type)  <--- hw/arm/virt.c, 创建vCPU QOM实例
+  +-> qdev_realize(DEVICE(cpuobj), ...)        <--- hw/arm/virt.c, realize触发arm_cpu_realizefn
+```
+
+vCPU线程在vCPU的realize函数中创建，线程函数是accel/kvm/kvm-accel-ops.c里的
+kvm_start_vcpu_thread。这个是vCPU实际开始运行的位置。
+```
+/* target/arm/cpu.c */
+arm_cpu_realizefn
+  +-> qemu_init_vcpu
+    +-> cpus_accel->create_vcpu_thread   <-- kvm_vcpu_thread_fn in kvm-accel-ops.c
+       +-> kvm_init_vcpu
+         +-> kvm_create_vcpu
+           +-> kvm_vm_ioctl(s, KVM_CREATE_VCPU, vcpu_id)
+         +-> kvm_arch_init_vcpu
+           +-> kvm_check_extension       <-- vCPU相关的特性的init，vCPU CAP的检测也可以放这里。
+           +-> kvm_arm_vcpu_init         <-- KVM_ARM_VCPU_INIT ioctl
+               /* 拿到kvm里的寄存器信息，并更新到cpreg里 */
+           +-> kvm_arm_init_cpreg_list
+
+       /* vCPU执行的核心循环 */
+       do {
+         +-> kvm_cpu_exec
+           +-> kvm_arch_put_registers(cpu, KVM_PUT_RUNTIME_STATE)
+           +-> kvm_vcpu_ioctl(cpu, KVM_RUN, 0)
+               /* 处理vCPU退出 */
+           +-> switch (run->exit_reason)
+               case ...
+               case ...
+
+         +-> qemu_wait_io_event 
+           +-> qemu_wait_io_event_common
+                 /*
+                  * 执行之前放入vcpu work_list里的任务，执行kvm_arch_put_registers。
+                  * 语义是把CPUState中的寄存器保存到list寄存器，再把list寄存器的
+                  * 数据通过ioctl KVM_SET_ONE_REG配置到KVM里。
+                  */
+             +-> process_queued_cpu_work
+       }
+```
+
+展开看下kvm_arch_put_registers的细节：
+```
+kvm_arch_put_registers
+  +-> write_cpustate_to_list
+        /* 得到系统寄存器对应ARMCPRegInfo描述结构 */
+    +-> ri = get_arm_cp_reginfo
+        /* 基本上对于CPU ID寄存器，是从cpu->isar.xxx的域段得到值 */
+    +-> newval = read_raw_cp_reg 
+    +-> if (kvm_sync)
+    +-> cpu->cpreg_values[i] = newval
+
+  +-> write_list_to_kvmstate
+```
+
+## 系统寄存器访问
+
+从get_arm_cp_reginfo可以看出，系统寄存器被保存在名为cp_regs的一个哈希表里，这个
+函数就是通过指令的各个域段作为key找到相关系统寄存器的描述结构体，寄存器的相关操
+作函数都定义在这个结构体里，在系统初始化的时候插入到cp_regs哈希表里:
+```
+ /* target/arm/cpu.c */
+ arm_cpu_realizefn
+   +-> register_cp_regs_for_features
+         /* 在V8这个分支定义相关和注册的寄存器 */
+     +-> if (arm_feature(env, ARM_FEATURE_V8))
+       [...]
+           /* 底层就是把定义的寄存器插入到cp_regs哈希表里 */
+       +-> define_arm_cp_regs
+```
+
+## 内存模拟
+
+基于KVM的QEMU虚机，会在QEMU里定义内存的基本拓扑、创建虚机内存管理基本框架，但是
+实际虚机内存管理数据面上的行为还是由KVM承载。
+
+### QEMU中内存定义
+
+qemu里内存模拟相关的基本数据结构有：AddressSpace/MemoryRegion/MemoryListener/MemorySlot等。
+AddressSpace表示地址空间，收集归拢MemoryRegion和MemoryListener等。MemoryRegion表示
+地址空间上的一段子空间，比如一个外设的MMIO空间就可以是一个MemoryRegion，一段内存
+也可以是一个MemoryRegion。MemoryListener向AddressSpace注册一组回调函数，当AddressSpace
+发生变化的时候，调用对应的回调函数，完成相关操作。
+
+虚机的内存布局一般定义在虚拟机器平台里，比如，ARM上我们常用的virt就是一种虚拟机器
+平台(hw/arm/virt.c)。virt的物理地址空间可能是如下，一般定义在virt.c的base_memmap[]。
+```
+[...]
+0x00000000 - 0x08000000  flash/ROM
+0x08000000 - 0x0a000000  GIC(GICD, GICC, GICV2M, GICH, GICV, ITS, GICR)
+0x09000000 - 0x09060000  UART, RTC, fw_cfg, GPIO, SMMU
+0x0a000000 - 0x0c000000  virtio MMIO (每块512B, 共512个)
+0x0c000000 - 0x0e000000  platform bus
+0x0e000000 - 0x10000000  secure memory
+0x10000000 - 0x40000000  PCIe (MMIO+IO+ECAM)
+/*
+ * 注意，这里定义的内存的起点。内存大小/NUMA/大页等需要根据qemu cmdline传入的参数
+ * 在如上A处初始化。
+ */
+0x40000000+              RAM (1 GiB起)
+```
+
+根MemoryRegion和AddressSpace的创建，初始化address_space_memory/address_space_io/
+system_memory/system_io，前两者是address space，后两者是memory region。
+```
+memory_map_init // system/physmem.c
+  +-> system_memory = container, size=UINT64_MAX  <--- 所有内存树的根
+  +-> address_space_init(&address_space_memory, system_memory, "memory")
+  +-> system_io (I/O空间, 64K)
+  +-> address_space_init(&address_space_io, system_io, "I/O")
+```
+
+### Host KVM中的虚机内存管理
+
+如上地址空间中定义的内存，需要qemu分配host内存来支持，所以被分配出来的虚机内存实际
+上有多个访问或管理接口：最核心的是guest内的访存指令直接访问，第二个是KVM hyp的管理，
+第三个是qemu进程访问，第四个是host内核内存管理机制的管理。
+
+如下是KVM虚拟内存管理示意图：
+```
+ +----------------------------------------------------------------------+
+ |  QEMU process                                                        |
+ |                                  |                 |                 |
+ |  QEMU main thread                |  vCPU0 thread   |   vCPU1 thread  |
+ |                                  |   (host EL0)    |    (host EL0)   |
+ |                                  |                 |                 |
+ |  +----------------+ <-- host VA  |                 |                 |
+ |   \                \             |                 |                 |
+ |    \                \            |                 |                 |
+ +----------------------------------+-----------------+-----------------+
+ |      \                \          |                 |                 |
+ |       \                \         | +----+          |    +----+       | <-- guest VA
+ |        \                \        |      \          |      /          |   |
+ |         \   host S1 map  \       |       \         |     /           |   | guest S1 map
+ |         ...              ...     |        \             /      KVM   |   v
+ |           \                \     |       +----------------+          | <-- IPA
+ |            \                \    +------------ / --------------------+   |
+ |             \             -------+------------/                HYP   |   |
+ |              \           /    \  |                                   |   | guest S2 map
+ +-------------------------/--------+-----------------------------------+   |
+ |                \       /        \                                    |   v
+ |   Memory        +----------------+                                   | <-- PA
+ |                                                                      |
+ +----------------------------------------------------------------------+
+```
+虚机的物理地址是在QEMU主线程里分配的一段QEMU进程的虚拟地址，IPA的地址是在QEMU里
+定义的，QEMU通过ioctl(KVM_SET_USER_MEMORY_REGION)把这个信息传递给KVM。
+
+直观上看，虚机内会自己管理自己的S1 map，KVM hypervisor会管理虚机的S2 map。虚机内存
+实际上是QEMU进程的内存，对应的内存会受到host内核各种内存管理机制的管理，比如，透明
+大页、传统大页、页面迁移等。host内核内存管理如果涉及到guest物理内存，需要通过mmu
+notifier的机制通知到KVM hypvisor，hypervisor一般的应对手段是unmap掉对应的guest S2 map。
+
+KVM memslot的同步 — MemoryListener机制(accel/kvm/kvm-all.c):
+kvm_init阶段通过kvm_memory_listener_register注册一个KVMMemoryListener到address_space_memory上。
+该listener的回调函数将QEMU的内存变更转化为KVM ioctl。
+```
+kvm_init
+  [...]
+  +-> kvm_memory_listener_register
+    +-> 创建kvm listener，增加相关回调kvm_region_add/del/commit, kvm_log_start/stop/sync/clear/sync_global等
+    +-> memory_listener_register(&kml->listener, &address_space_memory)
+        /* 注册时立即同步当前已有的FlatView */
+      +-> listener_add_address_space -> kvm_region_add -> kvm_set_phys_mem
+```
+
+machvirt_init调用memory_region_add_subregion的逻辑，最后会调用到如上注册的kvm_region_commit，
+其中会调用kvm ioctl把这段内存注册给内核KVM。machvirt_init里内存相关操作(hw/arm/virt.c)如下：
+```
+machvirt_init
+      /*
+       * 这里的system就是如上创建的system_memory，system_memory是整个地址空间？
+       * machine->ram是内存对应的MemoryRegion。
+       */
+  +-> memory_region_add_subregion(sysmem, VIRT_MEM.base, machine->ram)
+      /* 每个设备通过sysbus_mmio_map把各自的MMIO region挂到sysmem下 */
+  +-> create_gic      -> sysbus_mmio_map -> memory_region_add_subregion
+  +-> create_uart     -> memory_region_add_subregion
+  +-> create_rtc
+  +-> create_pcie
+  +-> create_smmu
+  +-> create_virtio_devices
+  +-> create_platform_bus
+```
+
+memory_region_add_subregion逻辑展开如下：
+```
+memory_region_add_subregion / sysbus_mmio_map
+  [...]
+  +-> memory_region_transaction_commit             <--- 内存树变更完成时触发
+    +-> address_space_update_topology_pass
+          /* 遍历FlatView，对每个FlatRange调用MEMORY_LISTENER_UPDATE_REGION */
+      +-> kvm_region_add                           <--- 排队到transaction_add
+    +-> MEMORY_LISTENER_CALL_GLOBAL(commit)        <--- 全局commit
+      +-> kvm_region_commit
+            /* 先删后加，处理重叠区域 */
+        +-> kvm_set_phys_mem(mem, section, add)
+            /* 关键过滤: 非RAM区域直接跳过, 不注册KVM memslot */
+          +-> if (!memory_region_is_ram(mr)) return
+            /* RAM区域分配KVMSlot, 调用KVM_SET_USER_MEMORY_REGION ioctl */
+          +-> kvm_set_user_memory_region -> KVM_SET_USER_MEMORY_REGION
+```
+注意，MMIO region不会传给KVM，客户机访问MMIO时发生VM exit，由QEMU的MemoryRegionOps->read/write处理。
+只有RAM通过KVM memslot映射到host的QEMU进程地址空间。
+
+KVMSlot结构(include/system/kvm_int.h):
+```
+start_addr          <--- GPA起始地址
+memory_size         <--- 区域大小
+ram                 <--- host虚拟地址 (QEMU进程的mmap地址)
+slot                <--- KVM slot编号
+flags               <--- KVM_MEM_LOG_DIRTY_PAGES等
+ram_start_offset    <--- 在RAMBlock里的偏移
+guest_memfd         <--- KVM_SET_USER_MEMORY_REGION2专用
+```
+
+KVM运行时的内存管理基本在KVM hypvisor内处理，注意的骨架是各种KVM S2 PTW(page table walk)、
+host内存管理和KVM hypvisor的交互。
+
+热迁移相关的内存管理逻辑在另外的文章中总结。
+
+## GIC模拟
+
+QEMU-KVM虚拟化中，GIC有两种模拟方式：in-kernel irqchip和用户态模拟。in-kernel irqchip
+将GICD/GICR的MMIO访问直接在KVM处理，避免退出到QEMU处理。用户态模拟在TCG或KVM不支持
+in-kernel irqchip时使用。
+
+GIC版本选择(finalize_gic_version, hw/arm/virt.c):
+```
+finalize_gic_version
+      /* KVM + in-kernel irqchip时, 通过ioctl探测host支持的GIC版本 */
+  +-> kvm_arm_vgic_probe            <--- KVM_DEV_ARM_VGIC_GRP_NR_IRQS
+        /* KVM不支持in-kernel irqchip时只支持GICv2 */
+      /* TCG下GICv2总是可用, GICv3需检查arm-gicv3模块 */
+```
+选出的版本决定了设备class:
+  - GICv2: kvm-arm-gic (KVM)或arm_gic (TCG)
+  - GICv3: kvm-arm-gicv3 (KVM)或arm-gicv3 (TCG)
+
+GIC创建(create_gic, hw/arm/virt.c):
+```
+create_gic
+  +-> 选设备class名(gic_class_name/gicv3_class_name)
+  +-> 设置属性(revision, num-cpu, num-irq, redist-region-count...)
+  +-> sysbus_realize_and_unref
+  |     /* KVM路径: kvm_arm_gicv3_realize in arm_gicv3_kvm.c */
+  |   +-> kvm_create_device(KVM_DEV_TYPE_ARM_VGIC_V3)
+  |   +-> kvm_device_access(KVM_DEV_ARM_VGIC_GRP_CTRL, KVM_DEV_ARM_VGIC_CTRL_INIT)
+  |         /* 把GIC的MMIO region注册给KVM */
+  |   +-> kvm_arm_register_device(iomem_dist, KVM_VGIC_V3_ADDR_TYPE_DIST)
+  |   +-> kvm_arm_register_device(redist_iomem, KVM_VGIC_V3_ADDR_TYPE_REDIST)
+  |         /* 配置IRQ路由 */
+  |   +-> kvm_irqchip_add_irq_route (for each SPI)
+  +-> sysbus_mmio_map (GICD @ 0x08000000, GICR @ 0x080A0000)
+  +-> wiring: CPU timer PPI -> GIC -> CPU IRQ/FIQ
+```
+要点: KVM in-kernel GIC创建后，GICD/GICR的MMIO访问直接在KVM里处理，不需要
+VM exit到QEMU。中断注入通过kvm_arm_gicv3_set_irq -> kvm_arm_set_irq -> KVM
+ioctl实现。
+
+KVM GICv3的寄存器访问(热迁移/调试用):
+  KVM_DEV_ARM_VGIC_GRP_DIST_REGS   — distributor寄存器
+  KVM_DEV_ARM_VGIC_GRP_REDIST_REGS — redistributor寄存器(用MPIDR选CPU)
+  KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS — CPU interface系统寄存器
+  KVM_DEV_ARM_VGIC_GRP_LEVEL_INFO  — 中断线电平
+
+ITS (arm_gicv3_its_kvm.c):
+  - KVM in-kernel ITS: kvm_create_device(KVM_DEV_TYPE_ARM_VGIC_ITS)
+  - MSI注入: kvm_its_send_msi -> KVM_SIGNAL_MSI ioctl (带device ID)
+  - 设置 kvm_msi_use_devid=true, kvm_gsi_direct_mapping=false
+
+## SMMU模拟
+
+QEMU的SMMU模拟主要分软件模拟和硬件加速两条路径：软件模拟通过IOMMUMemoryRegion的
+translate回调完成地址翻译；硬件加速(smmuv3-accel)通过iommufd将翻译卸载到物理SMMUv3硬件。
+
+SMMU创建(create_smmu, hw/arm/virt.c):
+  - 条件: -machine iommu=smmuv3 时 vms->iommu == VIRT_IOMMU_SMMUV3
+  - MMIO位于 0x09050000 (VIRT_SMMU), 4个SPI中断(irq 74-77)
+  - 默认stage="nested", 挂到PCIe primary bus
+
+SMMU类继承:
+  TYPE_ARM_SMMUV3 <- TYPE_ARM_SMMU <- TYPE_SYS_BUS_DEVICE
+  SMMUv3State包含SMMUState作为首个字段(C继承), SMMUState包含:
+    configs (STE/CD缓存), iotlb (TLB缓存), smmu_pcibus_by_busptr,
+    iommu_ops (PCIIOMMUOps)
+
+SMMU与PCIe的IOMMU挂钩(smmu_base_realize, smmu-common.c):
+```
+smmu_base_realize
+  +-> pci_setup_iommu(primary_bus, &smmu_ops, s)
+        /* smmu_ops = { .get_address_space = smmu_find_add_as } */
+        /*
+         * PCI设备DMA时调用pci_device_iommu_address_space()
+         * 沿PCI总线树向上找到iommu_ops -> get_address_space()
+         * 返回SMMUDevice->as, 这个AddressSpace的后端是IOMMUMemoryRegion
+         */
+
+smmu_find_add_as                                   <--- smmu-common.c
+  +-> smmu_init_sdev -> memory_region_init_iommu   <--- 创建IOMMUMemoryRegion
+      /* IOMMUMemoryRegion的translate回调 = smmuv3_translate */
+```
+
+SMMU翻译流程(smmu_translate, smmu-common.c):
+```
+smmuv3_translate                                   <--- smmuv3.c
+      /* 检查CR0.SMMUEN, 如果禁用则检查GBPA.ABORT */
+  +-> smmuv3_get_config                            <--- 从缓存或客户机内存解码STE/CD
+  +-> smmuv3_do_translate
+    +-> smmu_translate                             <--- smmu-common.c
+          /* 先在模拟IOTLB里找 */
+      +-> smmu_iotlb_lookup
+          /* 未命中则做PTW(页表遍历) */
+      +-> smmu_ptw
+        +-> smmu_ptw_64_s1 (VMSAv8-64 stage-1)
+        +-> smmu_ptw_64_s2 (stage-2)
+        +-> combine_tlb (nested: 组合S1+S2结果)
+      +-> smmu_iotlb_insert
+      /* 故障记入event queue, 触发SMMU_IRQ_EVTQ */
+  +-> smmuv3_record_event
+```
+
+命令队列(CmdQ, 客户机->SMMU)和事件队列(EvtQ, SMMU->客户机):
+  - 客户机通过CMDQ_BASE/CMDQ_PROD提交命令, SMMU处理并更新CMDQ_CONS
+  - 翻译故障时SMMU写入EVENTQ_BASE处的循环缓冲区, 触发事件中断
+  - 命令16字节, 事件32字节
+
+StreamID: SMMU用PCI BDF (bus:dev.fn)作为StreamID, 每个PCI设备有独立的SMMUDevice
+
+硬件加速(accel=on, smmuv3-accel.c):
+  - 需要iommufd支持的KVM
+  - 将真实SMMUv3硬件配置为nested模式，VFIO直通设备直接使用硬件SMMU
+  - 嵌套: KVM模拟S1翻译, 硬件处理S2翻译
+  - 此模式下热迁移被禁止
+
+SMMU的qemu模拟逻辑可以参考[这里](https://wangzhou.github.io/qemu-iommu模拟思路分析/)。
+
+todo: 基于iommufd的vSMMU逻辑
+
+## 热迁移的逻辑
+
+所有热迁移涉及的部件都有一个VMStateDescription结构，qemu用这个结构描述热迁移的相
+关信息，ARM的定义在target/arm/machine.c里。
+```
+ VMStateDescription vmstate_arm_cpu
+       /*
+        * 源端会把kvm里的CPU寄存器得到，并保存在list寄存器，最后保存到热迁移专用
+        * 的cpreg_vmstate_indexes/values等寄存器。
+        */
+   +-> cpu_pre_save
+     +-> write_kvmstate_to_list
+     +-> memcpy(cpreg_vmstate_indexes, cpreg_indexes, ...)
+     +-> memcpy(cpreg_vmstate_values, cpreg_values, ...)
+   +-> cpu_post_save
+   +-> cpu_pre_load
+       /* 
+        * 目的端会把cpreg_vmstate_values保存到list寄存器，并把list寄存器的值保存
+        * 到kvm和qemu cpustate寄存器里。
+        */
+   +-> cpu_post_load
+     +-> cpu->cpreg_values[i] = cpu->cpreg_vmstate_values[v]
+     +-> write_list_to_kvmstate(cpu, KVM_PUT_FULL_STATE)
+     +-> write_list_to_cpustate(cpu)
+```
+
+todo: 标记脏页逻辑
+
+## ACPI表构建
+```
+ virt_machine_done
+   +-> virt_acpi_setup
+     +-> todo: ...
+```
