@@ -34,17 +34,17 @@ categories:
 硬件通过SCR_EL3配置SEA/SEI报到EL2还是EL3。
 ```
 SCR_EL3
-┌─────────────────────────────────────────────────────────────┐
-│ Bit 3  │ EA (External Abort)                                │
-│        │ 1 = External Abort/SError routed to EL3            │
-│        │ 0 = External Abort routed based on exception level │
-├────────┼────────────────────────────────────────────────────┤
-│ Bit 2  │ FIQ (Fast Interrupt)                               │
-│        │ 1 = FIQ routed to EL3                              │
-├────────┼────────────────────────────────────────────────────┤
-│ Bit 1  │ IRQ (Interrupt Request)                            │
-│        │ 1 = IRQ routed to EL3                              │
-└────────┴────────────────────────────────────────────────────┘
++--------+----------------------------------------------------+
+| Bit 3  | EA (External Abort)                                |
+|        | 1 = External Abort/SError routed to EL3            |
+|        | 0 = External Abort routed based on exception level |
++--------+----------------------------------------------------+
+| Bit 2  | FIQ (Fast Interrupt)                               |
+|        | 1 = FIQ routed to EL3                              |
++--------+----------------------------------------------------+
+| Bit 1  | IRQ (Interrupt Request)                            |
+|        | 1 = IRQ routed to EL3                              |
++--------+----------------------------------------------------+
 ```
 注意，整个硬件系统分很多部件，比如很多L3/内存相关的部件OS里是看不见的，而core上
 报SEA/SEI是core和这些OS看不见部件综合作用的结果，这些部件可以有私有的配置，这些

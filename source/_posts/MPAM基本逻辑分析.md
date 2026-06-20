@@ -193,6 +193,8 @@ Partid的使用分映射和配置两个方面。只要配置了映射，硬件�
 控制组数都是32，但narrow把监控能力放大了8倍。本质是reqPARTID变成了PMG之上的第二
 层监控维度。
 
+(todo: 软件怎么使用)
+
 MPAM虚拟化
 -----------
 
@@ -296,12 +298,14 @@ struct mpam_component
   +-> ris list
 
 /*
- * 和resctrl fs的交互的数据结构，每个mpam_resctrl_res内嵌resctrl_resource，
+ * 和resctrl fs的交互的数据结构。使用一个mpam_resctrl_exports数组表示每种资源，
+ * 每个数组项就是一个struct mpam_resctrl_res。
+ *
  * 全局数组mpam_resctrl_exports[RDT_NUM_RESOURCES]索引L3/L2/MC。初始化时
  * mpam_domains_init()遍历每个class的component，调用mpam_resctrl_alloc_domain()
  * 分配mpam_resctrl_dom(内嵌resctrl_domain)，通过resctrl_online_domain()向
  * resctrl核心注册。用户写schemata时，驱动遍历对应component的所有RIS，调用
- * mpam_reprogram_ris_partid()写MSC硬件寄存器。
+ * mpam_reprogram_ris_partid()写MSC硬件寄存器。(todo)
  */
 struct mpam_resctrl_res
 ```
@@ -317,16 +321,24 @@ mpam_msc_drv_probe                  <-- probe以及创建MSC
            * 表的cache_reference，唯一标识一个特定缓存(如某个L3)；对于memory，
            * component_id来自proximity_domain转换的NUMA node ID，同一NUMA node上的
            * 多个内存控制器属于同一个component。每个component映射到一个resctrl域
-           * (schemata中的一行)，是该域的最小配置单元。
+           * (schemata中的一行)，是该域的最小配置单元。(todo)
            */
       +-> mpam_component_get
+  +-> mpam_register_cpuhp_callbacks(&mpam_discovery_cpu_online)
 
-mpam_discovery_cpu_online
+mpam_discovery_cpu_online           <-- 如上probe里注册，cpu online时执行
   +-> mpam_msc_hw_probe             <-- probe MSC硬件
-      /* work queue里执行 */
-  +-> mpam_resctrl_setup
-    +-> mpam_resctrl_resource_init  <-- 创建mpam_resctrl_res数组
-    +-> resctrl_init                <-- 创建resctrl相关文件
+  +-> mpam_enable                   <-- workqueue里执行
+    +-> mpam_enable_once
+      +-> mpam_resctrl_setup
+        +-> mpam_resctrl_resource_init  <-- 创建mpam_resctrl_res数组
+        +-> resctrl_init                <-- 创建resctrl相关文件
+    +-> mpam_register_cpuhp_callbacks(mpam_cpu_online)  <-- 注意，这里更换了mpam cpu online/offline的回调函数
+
+/* todo: 1. 分配domain，2. 控制监控和domain如何联系在一起 */
+mpam_cpu_online
+  ...
+  +-> mpam_resctrl_online_cpu
 ```
 
 resctrl文件创建: 
