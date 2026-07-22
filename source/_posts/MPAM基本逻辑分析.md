@@ -1,7 +1,7 @@
 ---
 title: MPAM基本逻辑分析
 tags:
-  - ARM
+  - ARM64
   - MPAM
   - 内存带宽
   - cache
